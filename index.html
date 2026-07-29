@@ -355,27 +355,38 @@ async function apiPost(body){
 
 async function load(){
   S.loading=true; render();
-  const [tx,gl,inc,ac,db,fl,co] = await Promise.all([
-    api({action:'getTransactions',month:S.month,year:S.year}),
-    api({action:'getGoals'}),
-    api({action:'getIncome',month:S.month,year:S.year}),
-    api({action:'getAccounts'}),
-    api({action:'getDebts'}),
-    api({action:'getFlows'}),
-    api({action:'getContributions',month:S.month,year:S.year})
-  ]);
+  const all = await api({action:'getAll',month:S.month,year:S.year});
+  if(all && all.transactions){
+    applyData(all);
+  } else {
+    // fallback for older backend deployments
+    const [tx,gl,inc,ac,db,fl,co] = await Promise.all([
+      api({action:'getTransactions',month:S.month,year:S.year}),
+      api({action:'getGoals'}),
+      api({action:'getIncome',month:S.month,year:S.year}),
+      api({action:'getAccounts'}),
+      api({action:'getDebts'}),
+      api({action:'getFlows'}),
+      api({action:'getContributions',month:S.month,year:S.year})
+    ]);
+    applyData({
+      transactions:tx?.transactions||[], goals:gl?.goals||[], income:inc?.income||[],
+      accounts:ac?.accounts||[], debts:db?.debts||[], payments:db?.payments||[],
+      flows:fl?.flows||[], contributions:co?.contributions||[]
+    });
+  }
+}
+function applyData(d){
   S.loading=false;
-  if(tx?.transactions){
-    S.txns = tx.transactions;
-    S.seeded = tx.transactions.some(t=>String(t.Notes||'').includes('AUTO_SEED') || String(t.TxType||'').toLowerCase()==='recurring');
-  } else S.txns=[];
-  S.goals = gl?.goals || [];
-  S.income = inc?.income || [];
-  S.accounts = ac?.accounts || [];
-  S.debts = db?.debts || [];
-  S.debtPayments = db?.payments || [];
-  S.flows = fl?.flows || [];
-  S.contribs = co?.contributions || [];
+  S.txns = d.transactions||[];
+  S.seeded = S.txns.some(t=>String(t.Notes||'').includes('AUTO_SEED') || String(t.TxType||'').toLowerCase()==='recurring');
+  S.goals = d.goals||[];
+  S.income = d.income||[];
+  S.accounts = d.accounts||[];
+  S.debts = d.debts||[];
+  S.debtPayments = d.payments||[];
+  S.flows = d.flows||[];
+  S.contribs = d.contributions||[];
   checkMilestones();
   render();
 }
