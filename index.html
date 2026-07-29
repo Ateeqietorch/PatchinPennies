@@ -190,6 +190,86 @@ textarea.finput{resize:none;min-height:60px}
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:14px}
 .loading-cat{font-size:44px;animation:bounce 1s ease-in-out infinite}
 @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+/* ─ Cash flow (sankey) ─ */
+.cf-card{background:linear-gradient(150deg,#3a2338,#241426);border:1.5px solid #5a3a55;border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow-lg)}
+.cf-eyebrow{font-family:var(--mono);font-size:10px;font-weight:500;color:#c9a3bd;text-transform:uppercase;letter-spacing:2.5px}
+.cf-svg{width:100%;height:auto;display:block;margin-top:10px}
+.cf-lbl{font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;fill:#fdf6f9}
+.cf-amt{font-family:'DM Mono',monospace;font-size:9.5px;fill:#c9a3bd}
+.cf-totals{display:flex;justify-content:space-between;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #5a3a5588}
+.cf-tot-lbl{font-size:9.5px;font-weight:800;color:#c9a3bd;text-transform:uppercase;letter-spacing:.6px}
+.cf-tot-val{font-family:var(--mono);font-size:15px;font-weight:500;color:#fdf6f9;letter-spacing:-.5px;margin-top:2px}
+/* ─ Money tab ─ */
+.person-toggle{display:flex;background:var(--bg2);border-radius:999px;padding:3px;gap:3px;margin-bottom:12px}
+.person-toggle .seg-opt{padding:7px;border-radius:999px}
+.acct{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--bg2)}
+.acct:last-child{border-bottom:none}
+.acct-ico{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:var(--sky-soft)}
+.acct-body{flex:1;min-width:0}
+.acct-name{font-size:13px;font-weight:800;color:var(--txt)}
+.acct-meta{font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:1px}
+.acct-bal{font-family:var(--mono);font-size:15px;font-weight:500;color:var(--txt);text-align:right}
+.acct-recon{font-size:9.5px;font-weight:800;color:var(--sky);text-align:right;margin-top:1px}
+.acct-recon.stale{color:var(--peach)}
+.melt-wrap{margin:8px 0 4px}
+.melt{height:14px;border-radius:99px;background:var(--bg2);overflow:hidden;display:flex}
+.melt-fill{height:100%;background:linear-gradient(90deg,#fda4b8,#fb7185);transition:width .8s cubic-bezier(.4,0,.2,1)}
+.melt-lbls{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--txt3);margin-top:4px}
+.debt{padding:11px 0;border-bottom:1px solid var(--bg2)}
+.debt:last-child{border-bottom:none}
+.debt-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.debt-name{font-size:13px;font-weight:800;color:var(--txt);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.debt-bal{font-family:var(--mono);font-size:13.5px;font-weight:500;color:var(--rose)}
+.debt-proj{font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:2px}
+.debt-proj b{color:var(--sky);font-weight:800}
+.debt-pri{display:inline-block;font-size:8.5px;font-weight:900;background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:99px;margin-left:5px;vertical-align:1px;text-transform:uppercase;letter-spacing:.4px}
+.debt-actions{display:flex;gap:6px;margin-top:7px}
+.debt-actions button{border:1.5px solid var(--border);background:var(--card);border-radius:9px;padding:6px 10px;font-family:var(--font);font-weight:800;font-size:10.5px;color:var(--txt2);cursor:pointer}
+.strategy{background:linear-gradient(135deg,var(--sky-soft),var(--lav-soft));border:1.5px solid var(--sky);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+.strategy-msg{font-size:12.5px;font-weight:700;color:var(--txt);margin-top:9px;line-height:1.5}
+.strategy-msg b{color:var(--sky)}
+.ring-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.ring-card{flex:0 0 108px;background:var(--card);border:1.5px solid var(--border);border-radius:15px;padding:11px 8px;text-align:center;box-shadow:var(--shadow)}
+.ring{position:relative;width:62px;height:62px;margin:0 auto 6px}
+.ring svg{transform:rotate(-90deg)}
+.ring-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:500;color:var(--txt)}
+.ring-name{font-size:10.5px;font-weight:800;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ring-nums{font-family:var(--mono);font-size:9px;color:var(--txt3);margin-top:1px}
+/* ─ Unallocated / plan ─ */
+.plan{border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;border:1.5px solid var(--border)}
+.plan-title{font-size:13px;font-weight:900;color:var(--txt)}
+.plan-sub{font-size:11px;font-weight:600;color:var(--txt2);margin-top:2px}
+.plan-amt{font-family:var(--mono);font-size:22px;font-weight:500;letter-spacing:-1px;margin-top:3px}
+/* ─ Flows (settings) ─ */
+.flow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bg2)}
+.flow:last-child{border-bottom:none}
+.flow-body{flex:1;min-width:0}
+.flow-name{font-size:13px;font-weight:800;color:var(--txt)}
+.flow-meta{font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:1px}
+.flow-amt{font-family:var(--mono);font-size:13px;font-weight:500}
+.flow-amt.invest{color:var(--mint)}.flow-amt.divest{color:var(--peach)}
+.switch{width:38px;height:22px;border-radius:99px;background:#e8d5e3;position:relative;cursor:pointer;flex-shrink:0;transition:background .2s}
+.switch.on{background:var(--mint)}
+.switch::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.switch.on::after{left:18px}
+/* ─ Money date ─ */
+.md-step{display:flex;align-items:flex-start;gap:12px;padding:13px 0;border-bottom:1px solid var(--bg2)}
+.md-step:last-child{border-bottom:none}
+.md-check{width:26px;height:26px;border-radius:50%;border:2px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;cursor:pointer;color:transparent;transition:all .2s}
+.md-check.done{background:var(--mint);border-color:var(--mint);color:#fff}
+.md-body{flex:1}
+.md-title{font-size:13.5px;font-weight:800;color:var(--txt)}
+.md-sub{font-size:11px;color:var(--txt2);font-weight:600;margin-top:2px;line-height:1.5}
+.md-link{font-size:11px;font-weight:800;color:var(--pink);cursor:pointer;margin-top:4px;display:inline-block}
+/* ─ Confetti ─ */
+.confetti-host{position:fixed;inset:0;pointer-events:none;z-index:300;overflow:hidden}
+.confetti{position:absolute;top:-14px;width:9px;height:13px;border-radius:2px;animation:cfall linear forwards}
+@keyframes cfall{to{transform:translateY(105vh) rotate(660deg);opacity:.7}}
+.milestone-pop{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);background:var(--card);border:2px solid var(--pink);border-radius:20px;padding:20px 26px;z-index:301;text-align:center;box-shadow:var(--shadow-lg);animation:popIn .35s cubic-bezier(.34,1.56,.64,1)}
+@keyframes popIn{from{transform:translate(-50%,-50%) scale(.6);opacity:0}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
+.milestone-ico{font-size:38px}
+.milestone-h{font-size:16px;font-weight:900;margin-top:4px}
+.milestone-s{font-size:12px;color:var(--txt2);font-weight:700;margin-top:2px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -220,6 +300,8 @@ const DEFAULT_BUDGETS = {
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PEOPLE = ['Ateeq','Celeste'];
+const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',retirement:'🌅 Retirement',investment:'📈 Investment',other:'💼 Other'};
+const ACCT_ICONS = {checking:'🏦',savings:'🌱',hysa:'🌱',retirement:'🌅',investment:'📈',other:'💼'};
 
 const today = () => new Date().toISOString().split('T')[0];
 const f$ = n => '$'+(Math.round((+n||0)*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -238,9 +320,16 @@ const S = {
   editTx:null,
   url: localStorage.getItem('casalog_url') || 'https://script.google.com/macros/s/AKfycbwytyrjnPRI5lSo8JFj37UHUAMgp7N9wrtdBoAXZIY9vYWn_X1nDenFhYMBKCQAA4CTLg/exec',
   setupUrl:'',
-  form:{ desc:'', amount:'', cat:'Groceries', payer:'Ateeq', txType:'One-time', date:today(), notes:'', receiptUrl:'' },
+  form:{ desc:'', amount:'', cat:'Groceries', payer:'Ateeq', txType:'One-time', date:today(), notes:'', receiptUrl:'', need:'Need', sub:false },
   incomeForm:{ desc:'', amount:'', source:'Ateeq', date:today(), notes:'' },
   goalForm:{ name:'', target:'', saved:'', date:'', type:'savings', notes:'' },
+  accounts:[], debts:[], debtPayments:[], flows:[], contribs:[],
+  person: localStorage.getItem('pp_person')||'All',
+  strategy: localStorage.getItem('pp_strategy')||'snowball',
+  acctFormOpen:false, acctForm:{ name:'', owner:'Both', type:'checking', balance:'', apy:'' },
+  debtFormOpen:false, debtForm:{ name:'', owner:'Celeste', balance:'', apr:'', minPayment:'', highPriority:false },
+  flowFormOpen:false, flowForm:{ name:'', amount:'', flowType:'invest', owner:'Both', dest:'', day:'1' },
+  milestone:null,
 };
 let _charts = {};
 
@@ -266,11 +355,14 @@ async function apiPost(body){
 
 async function load(){
   S.loading=true; render();
-  const [tx,gl,inc,hist] = await Promise.all([
+  const [tx,gl,inc,ac,db,fl,co] = await Promise.all([
     api({action:'getTransactions',month:S.month,year:S.year}),
     api({action:'getGoals'}),
     api({action:'getIncome',month:S.month,year:S.year}),
-    api({action:'getTransactions',months:6,year:S.year}).catch(()=>null)
+    api({action:'getAccounts'}),
+    api({action:'getDebts'}),
+    api({action:'getFlows'}),
+    api({action:'getContributions',month:S.month,year:S.year})
   ]);
   S.loading=false;
   if(tx?.transactions){
@@ -279,6 +371,12 @@ async function load(){
   } else S.txns=[];
   S.goals = gl?.goals || [];
   S.income = inc?.income || [];
+  S.accounts = ac?.accounts || [];
+  S.debts = db?.debts || [];
+  S.debtPayments = db?.payments || [];
+  S.flows = fl?.flows || [];
+  S.contribs = co?.contributions || [];
+  checkMilestones();
   render();
 }
 
@@ -353,11 +451,14 @@ function render(){
   if(S.view==='home') body=homeHTML();
   else if(S.view==='add') body=addHTML();
   else if(S.view==='trends') body=trendsHTML();
+  else if(S.view==='money') body=moneyHTML();
+  else if(S.view==='settings') body=settingsHTML();
+  else if(S.view==='moneydate') body=moneydateHTML();
   else if(S.view==='more') body=moreHTML();
   else if(S.view==='income') body=incomeHTML();
   else if(S.view==='goals') body=goalsHTML();
   else if(S.view==='recap') body=recapHTML();
-  app.innerHTML = topbarHTML() + body + navHTML() + (S.qaModal?qaConfirmHTML():'');
+  app.innerHTML = topbarHTML() + body + navHTML() + (S.qaModal?qaConfirmHTML():'') + (S.milestone?milestoneHTML():'');
   // post-render hooks
   if(S.view==='trends') requestAnimationFrame(drawCharts);
 }
@@ -378,7 +479,7 @@ function navHTML(){
   const item=(v,ico,lbl)=>`<button class="nav-item ${S.view===v?'on':''}" onclick="go('${v}')"><span class="nav-ico">${ico}</span><span class="nav-lbl">${lbl}</span></button>`;
   return `<div class="nav">
     ${item('home','🏠','Home')}
-    ${item('trends','📈','Trends')}
+    ${item('money','💎','Money')}
     <button class="nav-add" onclick="go('add')">＋</button>
     ${item('recap','📋','Recap')}
     ${item('more','🐾','More')}
@@ -437,6 +538,8 @@ function homeHTML(){
       <div class="health-ico">${health.emoji}</div>
       <div><div class="health-title">${health.title}</div><div class="health-sub">${health.sub}</div></div>
     </div>
+
+    ${planCardHTML()}
 
     <div class="total-card">
       <div class="total-eyebrow">Total Spent · ${MONTHS[S.month-1]}</div>
@@ -515,6 +618,8 @@ function addHTML(){
       <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setForm('desc',this.value)"></div>
       <div class="fgroup"><label class="flabel">Category</label><div class="cpill-wrap">${catPills}</div></div>
       <div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>
+      <div class="fgroup"><label class="flabel">Need or want?</label><div class="seg">${['Need','Want'].map(n=>`<div class="seg-opt ${f.need===n?'on':''}" onclick="setForm('need','${n}')">${n==='Need'?'🧺 Need':'✨ Want'}</div>`).join('')}</div></div>
+      <div class="fgroup"><div class="cpill ${f.sub?'on':''}" onclick="setForm('sub',${!f.sub})" style="display:inline-flex"><span class="ci">📱</span>Subscription</div></div>
       <div class="fgroup"><label class="flabel">Type</label><div class="seg">${typeSeg}</div></div>
       <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setForm('date',this.value)"></div>
       <button class="btn-primary" id="saveBtn" onclick="submitTx()">Add expense</button>
@@ -528,6 +633,7 @@ function trendsHTML(){
   const hasCat=Object.values(cats).some(v=>v>0);
   return `
     <div class="section-title">This month at a glance</div>
+    ${sankeyHTML()}
     <div class="card">
       <div class="card-title-row"><span class="card-title">🍩 Where it went</span></div>
       ${hasCat?`<div class="chart-wrap"><canvas id="catChart"></canvas></div>`:`<div class="empty"><div class="empty-ico">📊</div><div class="empty-h">Nothing to chart yet</div></div>`}
@@ -583,12 +689,26 @@ function recapHTML(){
   const {ateeq,celeste}=personTotals();
   const all=[...S.txns].sort((a,b)=>String(b.Date).localeCompare(String(a.Date)));
   const txList=all.length?all.map(t=>txRowHTML(t)).join(''):`<div class="empty"><div class="empty-ico">🐾</div><div class="empty-h">No transactions</div></div>`;
+  const wants=S.txns.filter(t=>String(t.Need||'').toLowerCase()==='want').reduce((s,t)=>s+txAmount(t),0);
+  const subs=S.txns.filter(t=>String(t.Sub||'').toLowerCase()==='yes').reduce((s,t)=>s+txAmount(t),0);
+  const invested=S.contribs.filter(c=>c.FlowType==='invest').reduce((s,c)=>s+c.Amount,0);
+  const debtPaid=S.debtPayments.filter(pm=>{const p=String(pm.Date).split('-');return +p[0]===S.year&&+p[1]===S.month;}).reduce((s,pm)=>s+pm.Amount,0);
   return `
     <div class="section-title">${MONTHS[S.month-1]} recap</div>
+    <div class="card" onclick="go('moneydate')" style="cursor:pointer;background:linear-gradient(135deg,var(--pink-soft),var(--yellow-soft))">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="card-title">💞 Money date</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Close out the month together — 10 minutes</div></div>
+        <span style="font-size:20px;color:var(--txt3)">›</span>
+      </div>
+    </div>
     <div class="card">
       <div class="recap-stat"><span class="recap-lbl">💰 Income</span><span class="recap-val" style="color:var(--mint)">${f$(inc.total)}</span></div>
       <div class="recap-stat"><span class="recap-lbl">💸 Spent</span><span class="recap-val" style="color:var(--pink)">${f$(exp)}</span></div>
-      <div class="recap-stat"><span class="recap-lbl">${net>=0?'🎉 Saved':'⚠️ Overspent'}</span><span class="recap-val" style="color:${net>=0?'var(--mint)':'var(--rose)'}">${net>=0?'+':'-'}${f$(Math.abs(net))}</span></div>
+      <div class="recap-stat"><span class="recap-lbl">✨ …of which wants</span><span class="recap-val" style="color:var(--peach)">${f$(wants)}</span></div>
+      <div class="recap-stat"><span class="recap-lbl">📱 …subscriptions</span><span class="recap-val" style="color:var(--lavender)">${f$(subs)}<span style="font-size:10px;color:var(--txt3)"> · ${f0(subs*12)}/yr pace</span></span></div>
+      <div class="recap-stat"><span class="recap-lbl">🌱 Invested / saved</span><span class="recap-val" style="color:var(--mint)">${f$(invested)}</span></div>
+      <div class="recap-stat"><span class="recap-lbl">💳 Debt paid</span><span class="recap-val" style="color:var(--sky)">${f$(debtPaid)}</span></div>
+      <div class="recap-stat"><span class="recap-lbl">${net>=0?'🎉 Net':'⚠️ Net'}</span><span class="recap-val" style="color:${net>=0?'var(--mint)':'var(--rose)'}">${net>=0?'+':'-'}${f$(Math.abs(net))}</span></div>
       <div class="recap-stat"><span class="recap-lbl">🧔 Ateeq spent</span><span class="recap-val">${f$(ateeq)}</span></div>
       <div class="recap-stat"><span class="recap-lbl">👩 Celeste spent</span><span class="recap-val">${f$(celeste)}</span></div>
     </div>
@@ -621,11 +741,23 @@ function moreHTML(){
         <span style="font-size:20px;color:var(--txt3)">›</span>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title-row"><span class="card-title">⚙️ Settings</span></div>
-      <button class="btn-ghost" onclick="editBudgets()" style="margin-top:0">Edit category budgets</button>
-      <button class="btn-ghost" onclick="changeUrl()">Change backend URL</button>
-      <button class="btn-ghost" onclick="load()">🔄 Refresh data</button>
+    <div class="card" onclick="go('moneydate')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="card-title">💞 Money date</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Monthly 10-minute check-in, together</div></div>
+        <span style="font-size:20px;color:var(--txt3)">›</span>
+      </div>
+    </div>
+    <div class="card" onclick="go('trends')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="card-title">📈 Trends</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Charts — where it went, who spent what</div></div>
+        <span style="font-size:20px;color:var(--txt3)">›</span>
+      </div>
+    </div>
+    <div class="card" onclick="go('settings')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="card-title">⚙️ Settings</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Recurring investments & divestments, budgets, backend</div></div>
+        <span style="font-size:20px;color:var(--txt3)">›</span>
+      </div>
     </div>
     <div style="text-align:center;font-size:11px;color:var(--txt3);font-weight:700;margin:6px 0 16px">PatchinPennies · for Ateeq, Celeste & Patches 🐱</div>
   `;
@@ -664,8 +796,6 @@ function incomeHTML(){
 function goalsHTML(){
   const f=S.goalForm;
   const savings=S.goals.filter(g=>g.Type!=='debt');
-  const debts=S.goals.filter(g=>g.Type==='debt');
-  const typeSeg=['savings','debt'].map(t=>`<div class="seg-opt ${f.type===t?'on':''}" onclick="setGoalForm('type','${t}')">${t==='savings'?'💰 Savings':'💳 Debt payoff'}</div>`).join('');
   const goalCard=g=>{
     const pct=goalPct(g), saved=parseAmt(g.Saved), target=parseAmt(g.Target);
     const isDebt=g.Type==='debt';
@@ -678,26 +808,366 @@ function goalsHTML(){
       <div class="track"><div class="track-fill ${pct<50?(isDebt?'danger':'safe'):pct<85?'warn':'safe'}" style="width:${pct}%"></div></div>
       <div class="goal-nums"><span style="color:${isDebt?'var(--rose)':'var(--mint)'}">${isDebt?'Paid off ':''}${f$(saved)}</span><span style="color:var(--txt3)">${isDebt?'of ':'/ '}${f$(target)}${days?` · ${days}d`:''}</span></div>
       <div class="goal-actions">
-        <button onclick="updateGoal('${g.ID}','${esc(g.Name)}',${isDebt})">${isDebt?'+ Log payment':'+ Add money'}</button>
+        <button onclick="contribute('${g.ID}','${esc(g.Name)}')">+ Add money</button>
         <button onclick="deleteGoal('${g.ID}')" style="flex:0 0 44px;color:var(--rose)">🗑</button>
       </div>
     </div>`;
   };
   return `
-    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Goals</div>
-    ${savings.length?`<div class="section-title">💰 Saving toward</div>${savings.map(goalCard).join('')}`:''}
-    ${debts.length?`<div class="section-title">💳 Paying off</div>${debts.map(goalCard).join('')}`:''}
-    ${!S.goals.length?`<div class="empty"><div class="empty-ico">🎯</div><div class="empty-h">No goals yet</div><div class="empty-s">Set a savings target or debt to crush</div></div>`:''}
+    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Savings goals</div>
+    ${savings.length?savings.map(goalCard).join(''):`<div class="empty"><div class="empty-ico">🎯</div><div class="empty-h">No goals yet</div><div class="empty-s">Set a savings target — trips, emergency fund, nest egg</div></div>`}
+    <div style="font-size:11px;color:var(--txt3);font-weight:600;text-align:center;margin:2px 0 12px">Debts live in the 💎 Money tab now</div>
     <div class="card">
-      <div class="card-title-row"><span class="card-title">New goal</span></div>
-      <div class="fgroup"><label class="flabel">Type</label><div class="seg">${typeSeg}</div></div>
-      <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="${f.type==='debt'?'e.g. Credit card':'e.g. Japan trip'}" value="${esc(f.name)}" oninput="setGoalForm('name',this.value)"></div>
-      <div class="fgroup"><label class="flabel">${f.type==='debt'?'Total balance to pay off':'Target amount'}</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.target}" oninput="setGoalForm('target',this.value)"></div>
-      <div class="fgroup"><label class="flabel">${f.type==='debt'?'Already paid off':'Already saved'} (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.saved}" oninput="setGoalForm('saved',this.value)"></div>
+      <div class="card-title-row"><span class="card-title">New savings goal</span></div>
+      <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="e.g. New York trip" value="${esc(f.name)}" oninput="setGoalForm('name',this.value)"></div>
+      <div class="fgroup"><label class="flabel">Target amount</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.target}" oninput="setGoalForm('target',this.value)"></div>
+      <div class="fgroup"><label class="flabel">Already saved (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.saved}" oninput="setGoalForm('saved',this.value)"></div>
       <div class="fgroup"><label class="flabel">Target date (optional)</label><input class="finput" type="date" value="${f.date}" oninput="setGoalForm('date',this.value)"></div>
       <button class="btn-primary" id="goalBtn" onclick="submitGoal()">Create goal</button>
     </div>
   `;
+}
+
+// ─── Cash flow sankey ────────────────────────────────────────────────────────
+function sankeyHTML(){
+  const income=incomeTotals().total;
+  const invested=S.contribs.filter(c=>c.FlowType==='invest').reduce((s,c)=>s+c.Amount,0);
+  const debtPaid=S.debtPayments.filter(pm=>{const p=String(pm.Date).split('-');return +p[0]===S.year&&+p[1]===S.month;}).reduce((s,pm)=>s+pm.Amount,0);
+  const cats=Object.entries(catTotals()).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  // group small categories into "Everything else" so ribbons stay readable
+  const MAXB=5;
+  const branches=[];
+  if(invested>0) branches.push({name:'Invested & saved',amt:invested,color:'#34d399'});
+  if(debtPaid>0) branches.push({name:'Debt payoff',amt:debtPaid,color:'#60a5fa'});
+  const big=cats.slice(0,MAXB), rest=cats.slice(MAXB);
+  big.forEach(([c,v])=>branches.push({name:c,amt:v,color:COLORS[c]||'#f9a8d4'}));
+  const restSum=rest.reduce((s,[,v])=>s+v,0);
+  if(restSum>0) branches.push({name:'Everything else',amt:restSum,color:'#b89aad'});
+  const outSum=branches.reduce((s,b)=>s+b.amt,0);
+  if(!outSum) return '';
+  const leftover=income-outSum;
+  if(income>0&&leftover>0.5) branches.push({name:'Unspent',amt:leftover,color:'#fbbf24'});
+  const total=Math.max(income,outSum);
+  if(total<=0) return '';
+
+  // geometry
+  const W=340, x1=16, x2=228, labelX=236, gap=8, minT=5, pad=8;
+  const flowPx=Math.max(branches.length*26, 150); // vertical pixels available for thickness
+  const scale=flowPx/total;
+  const th=branches.map(b=>Math.max(b.amt*scale,minT));
+  const H=pad*2+th.reduce((s,t)=>s+t,0)+gap*(branches.length-1);
+  // source bar spans the summed thickness, centered
+  const srcH=th.reduce((s,t)=>s+t,0);
+  const srcY=(H-srcH)/2;
+  let sy=srcY, ty=pad;
+  const defs=[], ribbons=[], labels=[];
+  branches.forEach((b,i)=>{
+    const t=th[i], mid=(x1+6+x2)/2;
+    const ys0=sy, ys1=sy+t, yt0=ty, yt1=ty+t;
+    defs.push(`<linearGradient id="cfg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#a3e635" stop-opacity=".55"/><stop offset="1" stop-color="${b.color}" stop-opacity=".9"/></linearGradient>`);
+    ribbons.push(`<path d="M${x1+6},${ys0} C${mid},${ys0} ${mid},${yt0} ${x2},${yt0} L${x2},${yt1} C${mid},${yt1} ${mid},${ys1} ${x1+6},${ys1} Z" fill="url(#cfg${i})"/>`);
+    ribbons.push(`<rect x="${x2}" y="${yt0}" width="3.5" height="${t}" rx="1.5" fill="${b.color}"/>`);
+    const pct=Math.round((b.amt/total)*100);
+    const lblY=yt0+t/2;
+    labels.push(`<text class="cf-lbl" x="${labelX}" y="${lblY-1}">${esc(b.name.length>17?b.name.slice(0,16)+'…':b.name)}</text>`);
+    labels.push(`<text class="cf-amt" x="${labelX}" y="${lblY+10}">${f0(b.amt)} (${pct}%)</text>`);
+    sy=ys1; ty=yt1+gap;
+  });
+  const cashflow=income-totalExpenses()-invested-debtPaid;
+  return `<div class="cf-card">
+    <div class="cf-eyebrow">Cash flow · ${MONTHS[S.month-1]}</div>
+    <svg class="cf-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs>${defs.join('')}</defs>
+      <rect x="${x1}" y="${srcY}" width="4" height="${srcH}" rx="2" fill="#a3e635"/>
+      ${income>0?`<text class="cf-amt" x="${x1}" y="${Math.max(srcY-6,9)}">In: ${f0(income)}</text>`:''}
+      ${ribbons.join('')}
+      ${labels.join('')}
+    </svg>
+    <div class="cf-totals">
+      <div><div class="cf-tot-lbl">Total income</div><div class="cf-tot-val">${f0(income)}</div></div>
+      <div><div class="cf-tot-lbl">Total expenses</div><div class="cf-tot-val">${f0(totalExpenses())}</div></div>
+      <div style="text-align:right"><div class="cf-tot-lbl">Cash flow / mo</div><div class="cf-tot-val" style="color:${cashflow>=0?'#6ee7b7':'#fda4b8'}">${cashflow>=0?'+':'−'}${f0(Math.abs(cashflow))}</div></div>
+    </div>
+  </div>`;
+}
+
+// ─── Plan (every dollar has a job) ───────────────────────────────────────────
+function planTotals(){
+  const budgetTotal=Object.values(S.budgets).reduce((s,v)=>s+(+v||0),0);
+  const flowInvest=S.flows.filter(f=>f.Active&&f.FlowType==='invest').reduce((s,f)=>s+f.Amount,0);
+  const debtMins=S.debts.filter(d=>d.Balance>0).reduce((s,d)=>s+d.MinPayment,0);
+  const income=incomeTotals().total;
+  return {income,budgetTotal,flowInvest,debtMins,unalloc:income-(budgetTotal+flowInvest+debtMins)};
+}
+function planCardHTML(){
+  const p=planTotals();
+  if(p.income===0) return '';
+  const u=Math.round(p.unalloc);
+  let bg,title,sub,color;
+  if(Math.abs(u)<1){ bg='linear-gradient(135deg,var(--mint-soft),var(--sky-soft))'; title='Every dollar has a job 🎉'; sub='Income fully allocated across budgets, savings & debt'; color='var(--mint)'; }
+  else if(u>0){ bg='linear-gradient(135deg,var(--yellow-soft),var(--peach-soft))'; title='Money without a job'; sub='Give it one: raise a budget, a flow, or a debt payment in Settings'; color='var(--peach)'; }
+  else { bg='linear-gradient(135deg,var(--rose-soft),var(--pink-soft))'; title='Plan exceeds income'; sub='Budgets + flows + debt payments are more than this month\'s income'; color='var(--rose)'; }
+  return `<div class="plan" style="background:${bg}" onclick="go('settings')">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div><div class="plan-title">${title}</div><div class="plan-sub">${sub}</div></div>
+      <div class="plan-amt" style="color:${color}">${u>0?'+':''}${f0(u)}</div>
+    </div>
+  </div>`;
+}
+
+// ─── Money tab ────────────────────────────────────────────────────────────────
+function byPerson(list){ return S.person==='All'?list:list.filter(x=>(x.Owner||'Both')===S.person||(x.Owner||'Both')==='Both'); }
+function debtPace(d){
+  const cutoff=new Date(Date.now()-90*864e5);
+  const paid90=S.debtPayments.filter(pm=>pm.DebtID===d.ID&&new Date(pm.Date)>=cutoff).reduce((s,pm)=>s+pm.Amount,0);
+  return Math.max(paid90/3, d.MinPayment||0);
+}
+function debtProjHTML(d){
+  if(d.Balance<=0) return `<div class="debt-proj" style="color:var(--mint);font-weight:800">Paid off 🎉</div>`;
+  const pace=debtPace(d);
+  if(pace<=0) return `<div class="debt-proj">Set a monthly payment to see a payoff date</div>`;
+  const months=Math.ceil(d.Balance/pace);
+  const dt=new Date(); dt.setMonth(dt.getMonth()+months);
+  return `<div class="debt-proj">At ~${f0(pace)}/mo · debt-free <b>${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}</b></div>`;
+}
+function strategyNext(){
+  const open=byPerson(S.debts).filter(d=>d.Balance>0);
+  if(!open.length) return null;
+  const sorted=[...open].sort((a,b)=> S.strategy==='avalanche'
+    ? (b.APR-a.APR)||(a.Balance-b.Balance)
+    : (a.Balance-b.Balance));
+  return sorted[0];
+}
+function ringHTML(g){
+  const pct=goalPct(g), r=26, c=2*Math.PI*r;
+  const col=pct>=100?'var(--mint)':'var(--pink)';
+  return `<div class="ring-card" onclick="contribute('${g.ID}','${esc(g.Name)}')">
+    <div class="ring">
+      <svg width="62" height="62"><circle cx="31" cy="31" r="${r}" fill="none" stroke="var(--bg2)" stroke-width="6"/>
+      <circle cx="31" cy="31" r="${r}" fill="none" stroke="${col}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-Math.min(pct,100)/100)}" style="transition:stroke-dashoffset .8s"/></svg>
+      <div class="ring-pct">${Math.round(pct)}%</div>
+    </div>
+    <div class="ring-name">${esc(g.Name)}</div>
+    <div class="ring-nums">${f0(parseAmt(g.Saved))} / ${f0(parseAmt(g.Target))}</div>
+  </div>`;
+}
+function moneyHTML(){
+  const accts=byPerson(S.accounts), debts=byPerson(S.debts);
+  const assets=accts.reduce((s,a)=>s+a.Balance,0);
+  const owed=debts.reduce((s,d)=>s+d.Balance,0);
+  const net=assets-owed;
+  const start=debts.reduce((s,d)=>s+d.StartBalance,0);
+  const paidAll=Math.max(start-owed,0);
+  const meltPct=start>0?(owed/start)*100:0;
+  const acctRow=a=>{
+    const fresh=a.LastReconciled&&a.LastReconciled.slice(0,7)===today().slice(0,7);
+    return `<div class="acct" onclick="reconcile('${a.ID}','${esc(a.Name)}',${a.Balance})">
+      <div class="acct-ico">${ACCT_ICONS[a.Type]||'💼'}</div>
+      <div class="acct-body"><div class="acct-name">${esc(a.Name)}</div><div class="acct-meta">${a.Owner} · ${(ACCT_TYPES[a.Type]||a.Type).replace(/^\S+ /,'')}${a.APY>0?` · ${a.APY}% APY`:''}</div></div>
+      <div><div class="acct-bal">${f$(a.Balance)}</div><div class="acct-recon ${fresh?'':'stale'}">${fresh?'✓ reconciled':a.LastReconciled?'tap to reconcile':'tap to set balance'}</div></div>
+    </div>`;
+  };
+  const debtRow=d=>`<div class="debt">
+    <div class="debt-row"><div class="debt-name">${esc(d.Name)}${d.HighPriority?'<span class="debt-pri">priority</span>':''}</div><div class="debt-bal">${d.Balance<=0?'—':f$(d.Balance)}</div></div>
+    ${debtProjHTML(d)}
+    <div class="debt-actions">
+      ${d.Balance>0?`<button onclick="payDebt('${d.ID}','${esc(d.Name)}')">💸 Log payment</button>`:''}
+      <button onclick="editDebt('${d.ID}')">✏️ Edit</button>
+      <button onclick="removeDebt('${d.ID}')" style="flex:0 0 40px;color:var(--rose)">🗑</button>
+    </div>
+  </div>`;
+  const next=strategyNext();
+  const allZeroApr=debts.filter(d=>d.Balance>0).every(d=>!d.APR);
+  const savings=S.goals.filter(g=>g.Type!=='debt');
+  return `
+    <div class="person-toggle">${['All','Ateeq','Celeste'].map(p=>`<div class="seg-opt ${S.person===p?'on':''}" onclick="setPerson('${p}')">${p==='All'?'👫 All':p==='Ateeq'?'🧔 Ateeq':'👩 Celeste'}</div>`).join('')}</div>
+
+    <div class="total-card" style="background:linear-gradient(135deg,var(--sky-soft),var(--mint-soft))">
+      <div class="total-eyebrow">${S.person==='All'?'Our':S.person+"'s"} money · right now</div>
+      <div class="total-amount" style="color:${net>=0?'var(--txt)':'var(--rose)'}">${net<0?'-':''}${f$(Math.abs(net))}</div>
+      <div class="total-sub">${f0(assets)} in accounts − ${f0(owed)} debt 🐾</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">🏦 Accounts</span><button class="card-toggle" onclick="S.acctFormOpen=!S.acctFormOpen;render()">${S.acctFormOpen?'− Close':'＋ Add'}</button></div>
+      ${S.acctFormOpen?acctFormHTML():''}
+      ${accts.length?accts.map(acctRow).join(''):`<div class="empty"><div class="empty-ico">🏦</div><div class="empty-h">No accounts yet</div><div class="empty-s">Add checking, the HYSA, 401ks…</div></div>`}
+    </div>
+
+    ${debts.length?`<div class="card">
+      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">${S.debtFormOpen?'− Close':'＋ Add'}</button></div>
+      ${S.debtFormOpen?debtFormHTML():''}
+      <div class="melt-wrap">
+        <div class="melt"><div class="melt-fill" style="width:${meltPct}%"></div></div>
+        <div class="melt-lbls"><span style="color:var(--mint);font-weight:700">${f0(paidAll)} crushed</span><span>${f0(owed)} to go</span></div>
+      </div>
+      ${debts.map(debtRow).join('')}
+    </div>
+    ${next?`<div class="strategy">
+      <div class="card-title-row" style="margin-bottom:0"><span class="card-title">🧭 Extra dollars go to…</span>
+        <div class="seg" style="background:rgba(255,255,255,.6)">${['snowball','avalanche'].map(s=>`<div class="seg-opt ${S.strategy===s?'on':''}" onclick="setStrategy('${s}')">${s==='snowball'?'⛄ Snowball':'🏔️ Avalanche'}</div>`).join('')}</div>
+      </div>
+      <div class="strategy-msg">Next target: <b>${esc(next.Name)}</b> (${f0(next.Balance)})${S.strategy==='snowball'?' — smallest balance first for quick wins.':allZeroApr?' — add APRs (✏️ Edit) so avalanche can rank by interest rate.':' — highest interest rate first to save the most.'}</div>
+    </div>`:''}`:`<div class="card">
+      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">＋ Add</button></div>
+      ${S.debtFormOpen?debtFormHTML():`<div class="empty"><div class="empty-ico">🕊️</div><div class="empty-h">No debts here</div><div class="empty-s">Nothing to pay off — living the dream</div></div>`}
+    </div>`}
+
+    ${savings.length?`<div class="card">
+      <div class="card-title-row"><span class="card-title">🌱 Saving toward</span><button class="card-toggle" onclick="go('goals')">Manage</button></div>
+      <div class="ring-row">${savings.map(ringHTML).join('')}</div>
+      <div style="font-size:10.5px;color:var(--txt3);font-weight:600;text-align:center;margin-top:8px">Tap a goal to add money</div>
+    </div>`:''}
+  `;
+}
+function acctFormHTML(){
+  const f=S.acctForm;
+  return `<div style="background:var(--card2);border-radius:13px;padding:12px;margin-bottom:12px">
+    <div class="fgroup"><label class="flabel">Account name</label><input class="finput" type="text" placeholder="e.g. Celeste's HYSA" value="${esc(f.name)}" oninput="S.acctForm.name=this.value"></div>
+    <div class="fgroup"><label class="flabel">Whose?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.acctForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
+    <div class="fgroup"><label class="flabel">Type</label><select class="finput" onchange="S.acctForm.type=this.value">${Object.keys(ACCT_TYPES).map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${ACCT_TYPES[t]}</option>`).join('')}</select></div>
+    <div class="fgroup"><label class="flabel">Current balance</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.balance}" oninput="S.acctForm.balance=this.value"></div>
+    <div class="fgroup"><label class="flabel">APY % (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="e.g. 4.2" value="${f.apy}" oninput="S.acctForm.apy=this.value"></div>
+    <button class="btn-primary" onclick="submitAccount()">Add account</button>
+  </div>`;
+}
+function debtFormHTML(){
+  const f=S.debtForm;
+  return `<div style="background:var(--card2);border-radius:13px;padding:12px;margin-bottom:12px">
+    <div class="fgroup"><label class="flabel">Debt name</label><input class="finput" type="text" placeholder="e.g. Direct Loan 1-01" value="${esc(f.name)}" oninput="S.debtForm.name=this.value"></div>
+    <div class="fgroup"><label class="flabel">Whose?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.debtForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
+    <div class="fgroup"><label class="flabel">Balance owed</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.balance}" oninput="S.debtForm.balance=this.value"></div>
+    <div class="fgroup"><label class="flabel">APR % (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="e.g. 5.5" value="${f.apr}" oninput="S.debtForm.apr=this.value"></div>
+    <div class="fgroup"><label class="flabel">Monthly payment (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.minPayment}" oninput="S.debtForm.minPayment=this.value"></div>
+    <div class="fgroup"><div class="cpill ${f.highPriority?'on':''}" onclick="S.debtForm.highPriority=!S.debtForm.highPriority;render()" style="display:inline-flex"><span class="ci">🔥</span>High priority</div></div>
+    <button class="btn-primary" onclick="submitDebt()">Add debt</button>
+  </div>`;
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function destOptions(sel){
+  const opts=[`<option value="" ${!sel?'selected':''}>No destination (just track it)</option>`];
+  S.accounts.forEach(a=>opts.push(`<option value="a:${a.ID}" ${sel==='a:'+a.ID?'selected':''}>🏦 ${esc(a.Name)}</option>`));
+  S.goals.filter(g=>g.Type!=='debt').forEach(g=>opts.push(`<option value="g:${g.ID}" ${sel==='g:'+g.ID?'selected':''}>🎯 ${esc(g.Name)}</option>`));
+  return opts.join('');
+}
+function flowDestName(f){
+  if(f.AccountID){ const a=S.accounts.find(x=>x.ID===f.AccountID); if(a) return '→ '+a.Name; }
+  if(f.GoalID){ const g=S.goals.find(x=>x.ID===f.GoalID); if(g) return '→ '+g.Name; }
+  return '';
+}
+function settingsHTML(){
+  const f=S.flowForm;
+  const flowRow=fl=>`<div class="flow">
+    <div class="flow-body" onclick="removeFlow('${fl.ID}')"><div class="flow-name">${fl.FlowType==='invest'?'🌱':'📤'} ${esc(fl.Name)}</div>
+    <div class="flow-meta">${fl.FlowType==='invest'?'Invest':'Divest'} · ${esc(flowDestName(fl))||'untracked'} · day ${fl.DayOfMonth} · ${fl.Owner}</div></div>
+    <div class="flow-amt ${fl.FlowType}">${fl.FlowType==='invest'?'+':'−'}${f0(fl.Amount)}/mo</div>
+    <div class="switch ${fl.Active?'on':''}" onclick="toggleFlow('${fl.ID}',${fl.Active})"></div>
+  </div>`;
+  const monthlyIn=S.flows.filter(x=>x.Active&&x.FlowType==='invest').reduce((s,x)=>s+x.Amount,0);
+  const monthlyOut=S.flows.filter(x=>x.Active&&x.FlowType==='divest').reduce((s,x)=>s+x.Amount,0);
+  return `
+    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Settings</div>
+
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">🔁 Recurring investments & divestments</span></div>
+      <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Auto-logged monthly on their day. Investing ${f0(monthlyIn)}/mo${monthlyOut?`, divesting ${f0(monthlyOut)}/mo`:''}.</div>
+      ${S.flows.length?S.flows.map(flowRow).join(''):`<div class="empty" style="padding:18px"><div class="empty-ico">🔁</div><div class="empty-h">No recurring flows yet</div><div class="empty-s">e.g. $200 → Celeste's HYSA on the 1st</div></div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">＋ New recurring flow</span></div>
+      <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="e.g. HYSA auto-save" value="${esc(f.name)}" oninput="S.flowForm.name=this.value"></div>
+      <div class="fgroup"><label class="flabel">Type</label><div class="seg">${[['invest','🌱 Invest'],['divest','📤 Divest']].map(([t,l])=>`<div class="seg-opt ${f.flowType===t?'on':''}" onclick="S.flowForm.flowType='${t}';render()">${l}</div>`).join('')}</div></div>
+      <div class="fgroup"><label class="flabel">Amount / month</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${f.amount}" oninput="S.flowForm.amount=this.value"></div>
+      <div class="fgroup"><label class="flabel">${f.flowType==='invest'?'Into which account or goal?':'Out of which account?'}</label><select class="finput" onchange="S.flowForm.dest=this.value">${destOptions(f.dest)}</select></div>
+      <div class="fgroup"><label class="flabel">Whose money?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.flowForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
+      <div class="fgroup"><label class="flabel">Day of month (1–28)</label><input class="finput" type="number" min="1" max="28" value="${f.day}" oninput="S.flowForm.day=this.value"></div>
+      <button class="btn-primary" onclick="submitFlow()">Add recurring flow</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">⚙️ App</span></div>
+      <button class="btn-ghost" onclick="editBudgets()" style="margin-top:0">Edit category budgets</button>
+      <button class="btn-ghost" onclick="changeUrl()">Change backend URL</button>
+      <button class="btn-ghost" onclick="load()">🔄 Refresh data</button>
+    </div>
+  `;
+}
+
+// ─── Money date ───────────────────────────────────────────────────────────────
+function mdKey(){ return 'pp_md_'+today().slice(0,7); }
+function mdState(){ return JSON.parse(localStorage.getItem(mdKey())||'{"recap":false,"plan":false,"celebrated":false}'); }
+function moneydateHTML(){
+  const st=mdState();
+  const allRecon=S.accounts.length>0&&S.accounts.every(a=>a.LastReconciled&&a.LastReconciled.slice(0,7)===today().slice(0,7));
+  const steps=[
+    {done:allRecon, title:'Reconcile every account', sub:allRecon?'All balances checked in this month — nice.':'Tap each account in Money and enter what the bank actually says.', link:'money', linkLbl:'Open Money →', auto:true},
+    {done:st.recap, title:'Review the recap together', sub:'Where did it go? Wants vs needs, top categories, who spent what.', link:'recap', linkLbl:'Open Recap →', key:'recap'},
+    {done:st.plan, title:"Set next month's plan", sub:'Adjust budgets, recurring flows, and debt payments until every dollar has a job.', link:'settings', linkLbl:'Open Settings →', key:'plan'},
+  ];
+  const doneCount=steps.filter(s=>s.done).length;
+  if(doneCount===3&&!st.celebrated){ const s2=mdState(); s2.celebrated=true; localStorage.setItem(mdKey(),JSON.stringify(s2)); confettiBurst(); }
+  return `
+    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Money date 💞</div>
+    <div class="total-card" style="background:linear-gradient(135deg,var(--pink-soft),var(--yellow-soft))">
+      <div class="total-eyebrow">${MONTHS[new Date().getMonth()]} check-in</div>
+      <div class="total-amount">${doneCount}/3</div>
+      <div class="total-sub">${doneCount===3?'Money date complete — treat yourselves 🍰':'Ten minutes, once a month, together'}</div>
+    </div>
+    <div class="card">
+      ${steps.map(s=>`<div class="md-step">
+        <div class="md-check ${s.done?'done':''}" ${s.auto?'':`onclick="mdToggle('${s.key}')"`}>✓</div>
+        <div class="md-body"><div class="md-title">${s.title}</div><div class="md-sub">${s.sub}</div><span class="md-link" onclick="go('${s.link}')">${s.linkLbl}</span></div>
+      </div>`).join('')}
+    </div>
+  `;
+}
+function mdToggle(k){ const st=mdState(); st[k]=!st[k]; localStorage.setItem(mdKey(),JSON.stringify(st)); render(); }
+
+// ─── Milestones & confetti ────────────────────────────────────────────────────
+function debtPctPaid(d){ return d.StartBalance>0?Math.min(((d.StartBalance-d.Balance)/d.StartBalance)*100,100):0; }
+function checkMilestones(){
+  const store=JSON.parse(localStorage.getItem('pp_milestones')||'null');
+  const fresh=store===null; const st=store||{};
+  const thresholds=[25,50,75,100]; let hit=null;
+  const consider=(id,pct,name,isDebt)=>{
+    const last=st[id];
+    if(last!=null&&!fresh){
+      for(const t of thresholds){ if(pct>=t&&last<t){ hit={t,name,isDebt}; } }
+    }
+    st[id]=pct;
+  };
+  S.goals.filter(g=>g.Type!=='debt').forEach(g=>consider('g_'+g.ID,goalPct(g),g.Name,false));
+  S.debts.forEach(d=>consider('d_'+d.ID,debtPctPaid(d),d.Name,true));
+  localStorage.setItem('pp_milestones',JSON.stringify(st));
+  if(hit){
+    S.milestone = hit.t===100
+      ? {ico:hit.isDebt?'🎊':'🏆', h:hit.isDebt?'DEBT CRUSHED!':'Goal complete!', s:hit.name+(hit.isDebt?' is fully paid off':' — you did it, you two')}
+      : {ico:hit.isDebt?'💪':'🌟', h:hit.t+'% '+(hit.isDebt?'paid off':'there'), s:hit.name};
+    confettiBurst();
+    setTimeout(()=>{ S.milestone=null; render(); }, 3200);
+  }
+}
+function milestoneHTML(){
+  const m=S.milestone;
+  return `<div class="milestone-pop" onclick="S.milestone=null;render()">
+    <div class="milestone-ico">${m.ico}</div><div class="milestone-h">${esc(m.h)}</div><div class="milestone-s">${esc(m.s)}</div>
+  </div>`;
+}
+function confettiBurst(){
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const host=document.createElement('div'); host.className='confetti-host'; document.body.appendChild(host);
+  const cols=['#f472b6','#a78bfa','#34d399','#fbbf24','#60a5fa','#fb7185'];
+  for(let i=0;i<28;i++){
+    const p=document.createElement('div'); p.className='confetti';
+    p.style.left=(Math.random()*100)+'vw';
+    p.style.background=cols[i%cols.length];
+    p.style.animationDuration=(1.4+Math.random()*.9)+'s';
+    p.style.animationDelay=(Math.random()*.3)+'s';
+    host.appendChild(p);
+  }
+  setTimeout(()=>host.remove(),2600);
 }
 
 // ─── QA confirm modal ─────────────────────────────────────────────────────────
@@ -730,7 +1200,7 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 function go(v){ S.view=v; window.scrollTo(0,0); render(); }
 function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--}if(m>12){m=1;y++} S.month=m;S.year=y; load(); }
 function toggleBudgets(){ S.budgetsOpen=!S.budgetsOpen; localStorage.setItem('pp_budgets_open',JSON.stringify(S.budgetsOpen)); render(); }
-function setForm(k,v){ S.form[k]=v; if(k==='cat'||k==='payer'||k==='txType') render(); }
+function setForm(k,v){ S.form[k]=v; if(k==='cat'||k==='payer'||k==='txType'||k==='need'||k==='sub') render(); }
 function setIncomeForm(k,v){ S.incomeForm[k]=v; if(k==='source') render(); }
 function setGoalForm(k,v){ S.goalForm[k]=v; if(k==='type') render(); }
 
@@ -745,11 +1215,11 @@ async function submitTx(){
   if(!f.amount||isNaN(parseFloat(f.amount))){ showToast('⚠️ Enter an amount'); return; }
   if(!f.desc.trim()){ showToast('⚠️ Add a description'); return; }
   const btn=document.getElementById('saveBtn'); if(btn)btn.disabled=true;
-  const d=await api({action:'addTransaction',date:f.date,description:f.desc,category:f.cat,paidBy:f.payer,amount:f.amount,txType:f.txType,notes:f.notes,receiptUrl:f.receiptUrl});
+  const d=await api({action:'addTransaction',date:f.date,description:f.desc,category:f.cat,paidBy:f.payer,amount:f.amount,txType:f.txType,notes:f.notes,receiptUrl:f.receiptUrl,need:f.need,sub:f.sub?'yes':''});
   if(btn)btn.disabled=false;
   if(d?.success){
     showToast('✅ Added!');
-    S.form={ desc:'',amount:'',cat:f.cat,payer:f.payer,txType:'One-time',date:today(),notes:'',receiptUrl:'' };
+    S.form={ desc:'',amount:'',cat:f.cat,payer:f.payer,txType:'One-time',date:today(),notes:'',receiptUrl:'',need:'Need',sub:false };
     go('home'); load();
   } else showToast('⚠️ '+(d?.error?String(d.error).slice(0,40):'Failed — run setup() in Apps Script'));
 }
@@ -780,6 +1250,72 @@ async function updateGoal(id,name,isDebt){
   if(d?.success){ showToast('✅ Updated!'); const g=await api({action:'getGoals'}); S.goals=g?.goals||[]; render(); }
 }
 async function deleteGoal(id){ if(!confirm('Delete this goal?'))return; const d=await api({action:'deleteGoal',goalId:id}); if(d?.success){showToast('🗑 Deleted');const g=await api({action:'getGoals'});S.goals=g?.goals||[];render();} }
+
+// ─── Money actions ───────────────────────────────────────────────────────────
+function setPerson(p){ S.person=p; localStorage.setItem('pp_person',p); render(); }
+function setStrategy(s){ S.strategy=s; localStorage.setItem('pp_strategy',s); render(); }
+async function reconcile(id,name,cur){
+  const v=prompt(`What does the bank say "${name}" holds right now?`, cur||'');
+  if(v===null||v===''||isNaN(parseFloat(v))) return;
+  const d=await api({action:'reconcileAccount',id,balance:v});
+  if(d?.success){
+    const dr=Math.round((d.drift||0)*100)/100;
+    showToast(dr===0?'✓ Balance confirmed':`✓ Reconciled · drift ${dr>0?'+':''}${f0(dr)}`);
+    load();
+  }
+}
+async function submitAccount(){
+  const f=S.acctForm;
+  if(!f.name.trim()){ showToast('⚠️ Name the account'); return; }
+  const d=await api({action:'addAccount',name:f.name,owner:f.owner,type:f.type,balance:f.balance||'0',apy:f.apy||'0'});
+  if(d?.success){ showToast('🏦 Account added'); S.acctForm={name:'',owner:'Both',type:'checking',balance:'',apy:''}; S.acctFormOpen=false; load(); }
+}
+async function submitDebt(){
+  const f=S.debtForm;
+  if(!f.name.trim()||!f.balance||isNaN(parseFloat(f.balance))){ showToast('⚠️ Name + balance needed'); return; }
+  const d=await api({action:'addDebt',name:f.name,owner:f.owner,balance:f.balance,apr:f.apr||'0',minPayment:f.minPayment||'0',highPriority:f.highPriority?'yes':'no'});
+  if(d?.success){ showToast('💳 Debt added'); S.debtForm={name:'',owner:'Celeste',balance:'',apr:'',minPayment:'',highPriority:false}; S.debtFormOpen=false; load(); }
+}
+async function payDebt(id,name){
+  const v=prompt(`Payment toward "${name}":`,''); if(!v||isNaN(parseFloat(v)))return;
+  const who=prompt('Who paid? (Ateeq / Celeste / Both)','Both')||'Both';
+  const d=await api({action:'logDebtPayment',debtId:id,amount:v,paidBy:who});
+  if(d?.success){ showToast(d.paidOff?'🎊 DEBT PAID OFF!':'💸 Payment logged'); load(); }
+}
+async function editDebt(id){
+  const dbt=S.debts.find(x=>x.ID===id); if(!dbt)return;
+  const apr=prompt(`APR % for "${dbt.Name}" (for avalanche ranking):`,dbt.APR||''); if(apr===null)return;
+  const mp=prompt('Planned monthly payment:',dbt.MinPayment||''); if(mp===null)return;
+  const hp=confirm('Mark as HIGH priority? (OK = yes, Cancel = no)');
+  const d=await api({action:'updateDebt',id,apr:apr||'0',minPayment:mp||'0',highPriority:hp?'yes':'no'});
+  if(d?.success){ showToast('✏️ Debt updated'); load(); }
+}
+async function removeDebt(id){ if(!confirm('Delete this debt and its payment history?'))return; const d=await api({action:'deleteDebt',id}); if(d?.success){showToast('🗑 Deleted');load();} }
+async function submitFlow(){
+  const f=S.flowForm;
+  if(!f.name.trim()||!f.amount||isNaN(parseFloat(f.amount))){ showToast('⚠️ Name + amount needed'); return; }
+  const accountId=f.dest.startsWith('a:')?f.dest.slice(2):'';
+  const goalId=f.dest.startsWith('g:')?f.dest.slice(2):'';
+  const d=await api({action:'addFlow',name:f.name,flowType:f.flowType,amount:f.amount,owner:f.owner,accountId,goalId,day:f.day||'1'});
+  if(d?.success){ showToast('🔁 Recurring flow added'); S.flowForm={name:'',amount:'',flowType:'invest',owner:'Both',dest:'',day:'1'}; load(); }
+}
+async function toggleFlow(id,active){
+  const d=await api({action:'updateFlow',id,active:active?'no':'yes'});
+  if(d?.success){ showToast(active?'⏸ Paused':'▶️ Active'); load(); }
+}
+async function removeFlow(id){ if(!confirm('Delete this recurring flow?'))return; const d=await api({action:'deleteFlow',id}); if(d?.success){showToast('🗑 Deleted');load();} }
+async function contribute(goalId,name){
+  const v=prompt(`Add to "${name}":`,''); if(!v||isNaN(parseFloat(v)))return;
+  let accountId='';
+  if(S.accounts.length){
+    const list=S.accounts.map((a,i)=>`${i+1} = ${a.Name}`).join('\n');
+    const pick=prompt(`Which account is it sitting in? (blank = none)\n${list}`,'');
+    const idx=parseInt(pick)-1;
+    if(!isNaN(idx)&&S.accounts[idx]) accountId=S.accounts[idx].ID;
+  }
+  const d=await api({action:'addContribution',flowType:'invest',amount:v,goalId,accountId,owner:'Both',notes:'Manual — '+name});
+  if(d?.success){ showToast('🌱 '+f0(parseFloat(v))+' saved!'); load(); }
+}
 
 async function seed(){
   showToast('🌱 Adding recurring…');
