@@ -298,6 +298,12 @@ const DEFAULT_BUDGETS = {
   'Utilities':150,'Health':100,'Shopping':150,'Personal/Misc':100,"Patches' Expenses":75
 };
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const FALLBACK_COLORS=['#93c5fd','#fdba74','#c4b5fd','#6ee7b7','#fde68a','#f0abfc','#a5f3fc','#fca5a5'];
+function customCats(){ return JSON.parse(localStorage.getItem('pp_custom_cats')||'[]'); }
+function setCustomCats(c){ localStorage.setItem('pp_custom_cats',JSON.stringify(c)); }
+function allCatNames(){ return CATS.concat(customCats().map(c=>c.name)); }
+function catIcon(c){ if(ICONS[c])return ICONS[c]; const cc=customCats().find(x=>x.name===c); return (cc&&cc.icon)||'📦'; }
+function catColor(c){ if(COLORS[c])return COLORS[c]; const cc=customCats().find(x=>x.name===c); return (cc&&cc.color)||'#f9a8d4'; }
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PEOPLE = ['Ateeq','Celeste'];
 const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',retirement:'🌅 Retirement',investment:'📈 Investment',other:'💼 Other'};
@@ -329,6 +335,7 @@ const S = {
   acctFormOpen:false, acctForm:{ name:'', owner:'Both', type:'checking', balance:'', apy:'' },
   debtFormOpen:false, debtForm:{ name:'', owner:'Celeste', balance:'', apr:'', minPayment:'', highPriority:false },
   flowFormOpen:false, flowForm:{ name:'', amount:'', flowType:'invest', owner:'Both', dest:'', day:'1' },
+  catForm:{ name:'', icon:'', budget:'' },
   milestone:null,
 };
 let _charts = {};
@@ -514,15 +521,15 @@ function homeHTML(){
 
   // Quick-adds
   const qas=getQuickAdds();
-  const qaButtons = qas.map((q,i)=>`<div class="qa-btn" onclick="openQA(${i})"><span class="qa-ico">${q.icon||ICONS[q.cat]||'📦'}</span><span class="qa-name">${q.name}</span><span class="qa-amt">${f$(q.amount)}</span></div>`).join('');
+  const qaButtons = qas.map((q,i)=>`<div class="qa-btn" onclick="openQA(${i})"><span class="qa-ico">${q.icon||catIcon(q.cat)}</span><span class="qa-name">${q.name}</span><span class="qa-amt">${f$(q.amount)}</span></div>`).join('');
   const qaAdd = qas.length<6?`<div class="qa-btn add-new" onclick="newQuickAdd()"><span class="qa-ico">＋</span><span class="qa-name">Add</span></div>`:'';
 
   // Budget bars
-  const budgetBars = CATS.map(cat=>{
+  const budgetBars = allCatNames().map(cat=>{
     const spent=cats[cat]||0, budget=budgets[cat]||0;
     const pct=budget>0?Math.min((spent/budget)*100,100):0;
     const cls=budget===0?'none':pct<70?'safe':pct<90?'warn':'danger';
-    return `<div><div class="bud-row"><span class="bud-name">${ICONS[cat]||'📋'} ${cat}</span><span class="bud-nums">${f0(spent)}${budget>0?' / '+f0(budget):''}</span></div><div class="track"><div class="track-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+    return `<div><div class="bud-row"><span class="bud-name">${catIcon(cat)} ${esc(cat)}</span><span class="bud-nums">${f0(spent)}${budget>0?' / '+f0(budget):''}</span></div><div class="track"><div class="track-fill ${cls}" style="width:${pct}%"></div></div></div>`;
   }).join('');
 
   // Settle-up card (only if there's an imbalance worth showing)
@@ -604,7 +611,7 @@ function txRowHTML(t){
   const badge = who==='Both'?`<span class="tx-badge badge-both">Split</span>`:isRecur?`<span class="tx-badge badge-recur">Auto</span>`:'';
   const dt=String(t.Date||'').slice(5).replace('-','/');
   return `<div class="tx" onclick="editTx('${t.ID}')">
-    <div class="tx-ico" style="background:${COLORS[cat]||'#f0d6e8'}33">${ICONS[cat]||'📦'}</div>
+    <div class="tx-ico" style="background:${catColor(cat)}33">${catIcon(cat)}</div>
     <div class="tx-body"><div class="tx-desc">${esc(t.Description||'—')}${badge}</div><div class="tx-meta">${cat} · ${who} · ${dt}</div></div>
     <div class="tx-amt">${f$(txAmount(t))}</div>
   </div>`;
@@ -613,7 +620,7 @@ function txRowHTML(t){
 // ─── ADD ──────────────────────────────────────────────────────────────────────
 function addHTML(){
   const f=S.form, scanning=S.scanning;
-  const catPills=CATS.map((c,i)=>`<div class="cpill ${f.cat===c?'on':''}" onclick="setForm('cat','${c.replace(/'/g,"\\'")}')"><span class="ci">${ICONS[c]}</span>${c}</div>`).join('');
+  const catPills=allCatNames().map((c,i)=>`<div class="cpill ${f.cat===c?'on':''}" onclick="setForm('cat',allCatNames()[${i}])"><span class="ci">${catIcon(c)}</span>${esc(c)}</div>`).join('');
   const payerSeg=['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.payer===p?'on':''}" onclick="setForm('payer','${p}')">${p}</div>`).join('');
   const typeSeg=['One-time','Recurring'].map(p=>`<div class="seg-opt ${f.txType===p?'on':''}" onclick="setForm('txType','${p}')">${p}</div>`).join('');
   return `
@@ -667,7 +674,7 @@ function drawCharts(){
   const entries=Object.entries(cats).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const catCanvas=document.getElementById('catChart');
   if(catCanvas&&entries.length){
-    _charts.cat=new Chart(catCanvas,{type:'doughnut',data:{labels:entries.map(e=>e[0]),datasets:[{data:entries.map(e=>e[1]),backgroundColor:entries.map(e=>COLORS[e[0]]||'#f0d6e8'),borderWidth:2,borderColor:'#fff'}]},options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Nunito',weight:'700',size:10},padding:9,boxWidth:11,usePointStyle:true}}},cutout:'62%',maintainAspectRatio:false}});
+    _charts.cat=new Chart(catCanvas,{type:'doughnut',data:{labels:entries.map(e=>e[0]),datasets:[{data:entries.map(e=>e[1]),backgroundColor:entries.map(e=>catColor(e[0])),borderWidth:2,borderColor:'#fff'}]},options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Nunito',weight:'700',size:10},padding:9,boxWidth:11,usePointStyle:true}}},cutout:'62%',maintainAspectRatio:false}});
   }
   const trendCanvas=document.getElementById('trendChart');
   if(trendCanvas){
@@ -851,7 +858,7 @@ function sankeyHTML(){
   if(invested>0) branches.push({name:'Invested & saved',amt:invested,color:'#34d399'});
   if(debtPaid>0) branches.push({name:'Debt payoff',amt:debtPaid,color:'#60a5fa'});
   const big=cats.slice(0,MAXB), rest=cats.slice(MAXB);
-  big.forEach(([c,v])=>branches.push({name:c,amt:v,color:COLORS[c]||'#f9a8d4'}));
+  big.forEach(([c,v])=>branches.push({name:c,amt:v,color:catColor(c)}));
   const restSum=rest.reduce((s,[,v])=>s+v,0);
   if(restSum>0) branches.push({name:'Everything else',amt:restSum,color:'#b89aad'});
   const outSum=branches.reduce((s,b)=>s+b.amt,0);
@@ -1098,9 +1105,32 @@ function settingsHTML(){
     </div>
 
     <div class="card">
+      <div class="card-title-row"><span class="card-title">🗂 Categories & budgets</span></div>
+      <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Monthly limits power the budget bars and the "every dollar has a job" card. Budgets total ${f0(Object.values(S.budgets).reduce((s,v)=>s+(+v||0),0))}/mo.</div>
+      ${allCatNames().map((c,i)=>{
+        const isCustom=i>=CATS.length;
+        return `<div class="flow">
+          <div class="flow-body"><div class="flow-name">${catIcon(c)} ${esc(c)}</div>${isCustom?'<div class="flow-meta">custom category</div>':''}</div>
+          <input class="finput" type="number" inputmode="decimal" placeholder="no limit" value="${S.budgets[c]??''}" onchange="setBudgetIdx(${i},this.value)" style="width:92px;padding:8px 10px;font-family:var(--mono);font-size:13px;text-align:right">
+          ${isCustom?`<button onclick="delCategory(${i-CATS.length})" style="border:none;background:none;color:var(--rose);font-size:15px;cursor:pointer;padding:4px">🗑</button>`:''}
+        </div>`;
+      }).join('')}
+      <div style="background:var(--card2);border-radius:13px;padding:12px;margin-top:12px">
+        <div class="flabel" style="margin-bottom:8px">Add a category</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input class="finput" type="text" maxlength="3" placeholder="🎸" value="${esc(S.catForm.icon)}" oninput="S.catForm.icon=this.value" style="flex:0 0 58px;text-align:center">
+          <input class="finput" type="text" placeholder="Name (e.g. Comedy shows)" value="${esc(S.catForm.name)}" oninput="S.catForm.name=this.value" style="flex:1">
+        </div>
+        <div style="display:flex;gap:8px">
+          <input class="finput" type="number" inputmode="decimal" placeholder="Monthly limit (optional)" value="${S.catForm.budget}" oninput="S.catForm.budget=this.value" style="flex:1">
+          <button class="btn-primary" onclick="addCategory()" style="flex:0 0 92px;padding:10px">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title-row"><span class="card-title">⚙️ App</span></div>
-      <button class="btn-ghost" onclick="editBudgets()" style="margin-top:0">Edit category budgets</button>
-      <button class="btn-ghost" onclick="changeUrl()">Change backend URL</button>
+      <button class="btn-ghost" onclick="changeUrl()" style="margin-top:0">Change backend URL</button>
       <button class="btn-ghost" onclick="load()">🔄 Refresh data</button>
     </div>
   `;
@@ -1364,10 +1394,30 @@ async function confirmQA(){
   if(d?.success){ showToast('✅ '+q.name+' logged'); load(); }
 }
 
-function editBudgets(){
-  const cat=prompt('Edit budget for which category?\n'+CATS.join(', ')); if(!cat||!CATS.includes(cat))return;
-  const v=prompt(`Monthly budget for ${cat}:`,S.budgets[cat]||0); if(v===null)return;
-  S.budgets[cat]=parseFloat(v)||0; localStorage.setItem('pp_budgets',JSON.stringify(S.budgets)); showToast('✅ Budget updated'); render();
+function setBudgetIdx(i,v){
+  const name=allCatNames()[i]; if(!name)return;
+  if(v===''||v==null){ delete S.budgets[name]; } else { S.budgets[name]=parseFloat(v)||0; }
+  localStorage.setItem('pp_budgets',JSON.stringify(S.budgets));
+  showToast('✅ '+name+' limit saved'); render();
+}
+function addCategory(){
+  const f=S.catForm, name=(f.name||'').trim();
+  if(!name){ showToast('⚠️ Name the category'); return; }
+  if(allCatNames().some(c=>c.toLowerCase()===name.toLowerCase())){ showToast('⚠️ That category already exists'); return; }
+  const custom=customCats();
+  custom.push({name, icon:(f.icon||'').trim()||'📦', color:FALLBACK_COLORS[custom.length%FALLBACK_COLORS.length]});
+  setCustomCats(custom);
+  if(f.budget&&!isNaN(parseFloat(f.budget))){ S.budgets[name]=parseFloat(f.budget); localStorage.setItem('pp_budgets',JSON.stringify(S.budgets)); }
+  S.catForm={name:'',icon:'',budget:''};
+  showToast('🗂 '+name+' added'); render();
+}
+function delCategory(ci){
+  const custom=customCats(); const cat=custom[ci]; if(!cat)return;
+  if(!confirm(`Remove "${cat.name}"? Past transactions keep the name; it just leaves the pickers.`))return;
+  custom.splice(ci,1); setCustomCats(custom);
+  delete S.budgets[cat.name]; localStorage.setItem('pp_budgets',JSON.stringify(S.budgets));
+  if(S.form.cat===cat.name) S.form.cat='Groceries';
+  showToast('🗑 Removed'); render();
 }
 function changeUrl(){ const u=prompt('Apps Script URL:',S.url); if(u){ S.url=u; localStorage.setItem('casalog_url',u); load(); } }
 function saveUrl(){ const u=document.getElementById('setupUrl').value.trim(); if(u){ S.url=u; localStorage.setItem('casalog_url',u); load(); } }
@@ -1383,13 +1433,13 @@ async function handleReceipt(input){
     const up=await apiPost({action:'saveReceipt',base64,filename:file.name||'receipt.jpg',mediaType:file.type||'image/jpeg'});
     if(up?.url) S.form.receiptUrl=up.url;
     // Read amount via Claude
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type||'image/jpeg',data:base64}},{type:'text',text:'Read this receipt. Respond ONLY with JSON, no markdown: {"amount": number, "description": "store name", "category": one of [Groceries,Dining Out,Entertainment,Transportation,Utilities,Health,Shopping,Personal/Misc]}'}]}]})});
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type||'image/jpeg',data:base64}},{type:'text',text:'Read this receipt. Respond ONLY with JSON, no markdown: {"amount": number, "description": "store name", "category": one of ['+allCatNames().join(',')+']}'}]}]})});
     const data=await resp.json();
     const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').replace(/```json|```/g,'').trim();
     const parsed=JSON.parse(txt);
     if(parsed.amount) S.form.amount=String(parsed.amount);
     if(parsed.description) S.form.desc=parsed.description;
-    if(parsed.category&&CATS.includes(parsed.category)) S.form.cat=parsed.category;
+    if(parsed.category&&allCatNames().includes(parsed.category)) S.form.cat=parsed.category;
     showToast('✅ Receipt read!');
   }catch(e){ showToast('⚠️ Could not read receipt'); }
   S.scanning=false; render();
