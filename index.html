@@ -337,7 +337,7 @@ const S = {
   budgets: JSON.parse(localStorage.getItem('pp_budgets')||'null') || DEFAULT_BUDGETS,
   qaModal:null, qaForm:{},
   editTx:null,
-  url: localStorage.getItem('casalog_url') || 'https://script.google.com/macros/s/AKfycbwytyrjnPRI5lSo8JFj37UHUAMgp7N9wrtdBoAXZIY9vYWn_X1nDenFhYMBKCQAA4CTLg/exec',
+  url: localStorage.getItem('casalog_url') || 'https://script.google.com/macros/s/AKfycbxle4CS8BPQIjudoTNofO-L2Rx3zyucyZYCPJ16-bfKgU7g_dTSPqtcJjtozhpuWKf3dQ/exec',
   setupUrl:'',
   form:{ desc:'', amount:'', cat:'Groceries', payer:'Ateeq', txType:'One-time', date:today(), notes:'', receiptUrl:'', need:'Need', sub:false, payWith:'cash' },
   incomeForm:{ desc:'', amount:'', source:'Ateeq', date:today(), notes:'' },
@@ -1104,6 +1104,7 @@ function moneyHTML(){
     </div>
 
     ${cardBlock}
+    ${cardAccts.length?'':`<div class="card" style="background:var(--lav-soft);border-color:var(--lavender)"><div style="font-size:12px;font-weight:700;color:var(--txt)">💳 No credit card yet</div><div style="font-size:11px;color:var(--txt2);font-weight:600;margin-top:3px">Add one below (＋ Add → type "Credit card") to track a filling balance and pay with it on the Add screen.</div></div>`}
 
     <div class="card">
       <div class="card-title-row"><span class="card-title">🏦 Accounts</span><button class="card-toggle" onclick="S.acctFormOpen=!S.acctFormOpen;render()">${S.acctFormOpen?'− Close':'＋ Add'}</button></div>
@@ -1398,8 +1399,9 @@ async function reconcile(id,name,cur){
 async function submitAccount(){
   const f=S.acctForm;
   if(!f.name.trim()){ showToast('⚠️ Name the account'); return; }
-  const d=await api({action:'addAccount',name:f.name,owner:f.owner,type:f.type,balance:f.balance||'0',apy:f.apy||'0'});
-  if(d?.success){ showToast('🏦 Account added'); S.acctForm={name:'',owner:'Both',type:'checking',balance:'',apy:''}; S.acctFormOpen=false; load(); }
+  const d=await api({action:'addAccount',name:f.name,owner:f.owner,type:f.type,balance:f.balance||'0',apy:f.apy||'0',limit:f.limit||'0'});
+  if(d?.success){ showToast(f.type==='credit'?'💳 Card added':'🏦 Account added'); S.acctForm={name:'',owner:'Both',type:'checking',balance:'',apy:'',limit:''}; S.acctFormOpen=false; load(); }
+  else showToast('⚠️ '+(d?.error?String(d.error).slice(0,40):'Failed — run setup()'));
 }
 async function submitDebt(){
   const f=S.debtForm;
