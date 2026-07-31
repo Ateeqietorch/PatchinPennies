@@ -38,6 +38,17 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .month-nav button{background:none;border:none;font-size:15px;color:var(--txt2);width:26px;height:26px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .month-nav button:active{background:var(--pink-soft)}
 .month-nav .mlabel{font-size:12px;font-weight:800;color:var(--txt);min-width:62px;text-align:center}
+.gear-btn{background:var(--card);border:1.5px solid var(--border);border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
+.gear-btn:active{background:var(--pink-soft)}
+.addchooser{display:flex;gap:10px;margin-bottom:14px}
+.addchooser .seg-opt{flex:1;padding:12px 8px;border:1.5px solid var(--border);border-radius:13px;background:var(--card);font-size:13px}
+.addchooser .seg-opt.on{background:var(--pink);color:#fff;border-color:var(--pink)}
+.util-wrap{margin:7px 0 2px}
+.util-bar{height:13px;border-radius:99px;background:var(--bg2);overflow:hidden}
+.util-fill{height:100%;border-radius:99px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+.util-lbls{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--txt3);margin-top:4px}
+.money-subtabs{display:flex;background:var(--bg2);border-radius:999px;padding:3px;gap:3px;margin-bottom:14px}
+.money-subtabs .seg-opt{padding:8px;border-radius:999px}
 
 /* Cards */
 .card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow)}
@@ -306,8 +317,10 @@ function catIcon(c){ if(ICONS[c])return ICONS[c]; const cc=customCats().find(x=>
 function catColor(c){ if(COLORS[c])return COLORS[c]; const cc=customCats().find(x=>x.name===c); return (cc&&cc.color)||'#f9a8d4'; }
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PEOPLE = ['Ateeq','Celeste'];
-const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',retirement:'🌅 Retirement',investment:'📈 Investment',other:'💼 Other'};
-const ACCT_ICONS = {checking:'🏦',savings:'🌱',hysa:'🌱',retirement:'🌅',investment:'📈',other:'💼'};
+const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',retirement:'🌅 Retirement',investment:'📈 Investment / Roth',credit:'💳 Credit card',other:'💼 Other'};
+const ACCT_ICONS = {checking:'🏦',savings:'🌱',hysa:'🌱',retirement:'🌅',investment:'📈',credit:'💳',other:'💼'};
+const FREQS = {weekly:'Weekly',biweekly:'Every 2 weeks',semimonthly:'Twice a month',monthly:'Monthly'};
+function flowMonthly(f){ const a=+f.Amount||0; return f.Frequency==='weekly'?a*52/12:f.Frequency==='biweekly'?a*26/12:f.Frequency==='semimonthly'?a*2:a; }
 
 const today = () => new Date().toISOString().split('T')[0];
 const f$ = n => '$'+(Math.round((+n||0)*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -326,17 +339,20 @@ const S = {
   editTx:null,
   url: localStorage.getItem('casalog_url') || 'https://script.google.com/macros/s/AKfycbwytyrjnPRI5lSo8JFj37UHUAMgp7N9wrtdBoAXZIY9vYWn_X1nDenFhYMBKCQAA4CTLg/exec',
   setupUrl:'',
-  form:{ desc:'', amount:'', cat:'Groceries', payer:'Ateeq', txType:'One-time', date:today(), notes:'', receiptUrl:'', need:'Need', sub:false },
+  form:{ desc:'', amount:'', cat:'Groceries', payer:'Ateeq', txType:'One-time', date:today(), notes:'', receiptUrl:'', need:'Need', sub:false, payWith:'cash' },
   incomeForm:{ desc:'', amount:'', source:'Ateeq', date:today(), notes:'' },
   goalForm:{ name:'', target:'', saved:'', date:'', type:'savings', notes:'' },
-  accounts:[], debts:[], debtPayments:[], flows:[], contribs:[],
+  accounts:[], debts:[], debtPayments:[], flows:[], contribs:[], cardCharges:[],
   person: localStorage.getItem('pp_person')||'All',
   strategy: localStorage.getItem('pp_strategy')||'snowball',
-  acctFormOpen:false, acctForm:{ name:'', owner:'Both', type:'checking', balance:'', apy:'' },
+  acctFormOpen:false, acctForm:{ name:'', owner:'Both', type:'checking', balance:'', apy:'', limit:'' },
   debtFormOpen:false, debtForm:{ name:'', owner:'Celeste', balance:'', apr:'', minPayment:'', highPriority:false },
-  flowFormOpen:false, flowForm:{ name:'', amount:'', flowType:'invest', owner:'Both', dest:'', day:'1' },
+  flowFormOpen:false, flowForm:{ name:'', amount:'', flowType:'invest', owner:'Both', dest:'', day:'1', frequency:'monthly' },
   catForm:{ name:'', icon:'', budget:'' },
+  addMode:'expense',
+  moveForm:{ amount:'', dir:'in', dest:'', from:'', owner:'Both' },
   milestone:null,
+  moneyTab:'overview',
 };
 let _charts = {};
 
@@ -394,6 +410,7 @@ function applyData(d){
   S.debtPayments = d.payments||[];
   S.flows = d.flows||[];
   S.contribs = d.contributions||[];
+  S.cardCharges = d.cardCharges||[];
   checkMilestones();
   render();
 }
@@ -468,28 +485,27 @@ function render(){
   let body='';
   if(S.view==='home') body=homeHTML();
   else if(S.view==='add') body=addHTML();
-  else if(S.view==='trends') body=trendsHTML();
   else if(S.view==='money') body=moneyHTML();
+  else if(S.view==='goals') body=goalsHTML();
   else if(S.view==='settings') body=settingsHTML();
   else if(S.view==='moneydate') body=moneydateHTML();
-  else if(S.view==='more') body=moreHTML();
   else if(S.view==='income') body=incomeHTML();
-  else if(S.view==='goals') body=goalsHTML();
   else if(S.view==='recap') body=recapHTML();
-  app.innerHTML = topbarHTML() + body + navHTML() + (S.qaModal?qaConfirmHTML():'') + (S.milestone?milestoneHTML():'');
+  else body=homeHTML();
+  app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'');
   // post-render hooks
-  if(S.view==='trends') requestAnimationFrame(drawCharts);
+  if(S.view==='money' && S.moneyTab==='trends') requestAnimationFrame(drawCharts);
 }
 
 function topbarHTML(){
-  const showMonth = ['home','trends','income','recap'].includes(S.view);
+  const showMonth = ['home','income','recap'].includes(S.view);
   return `<div class="topbar">
     <div class="wordmark">Patchin<em>Pennies</em></div>
     ${showMonth?`<div class="month-nav">
       <button onclick="shiftMonth(-1)">‹</button>
       <span class="mlabel">${MONTHS_SHORT[S.month-1]} ${S.year}</span>
       <button onclick="shiftMonth(1)">›</button>
-    </div>`:`<div style="font-size:22px">🐱</div>`}
+    </div>`:`<div style="display:flex;gap:12px;align-items:center"><div style="font-size:20px">🐱</div><button class="gear-btn" onclick="go('settings')" aria-label="Settings">⚙️</button></div>`}
   </div>`;
 }
 
@@ -498,9 +514,9 @@ function navHTML(){
   return `<div class="nav">
     ${item('home','🏠','Home')}
     ${item('money','💎','Money')}
-    <button class="nav-add" onclick="go('add')">＋</button>
+    <button class="nav-add" onclick="openAdd()">＋</button>
+    ${item('goals','🎯','Goals')}
     ${item('recap','📋','Recap')}
-    ${item('more','🐾','More')}
   </div>`;
 }
 
@@ -518,11 +534,6 @@ function homeHTML(){
 
   const netColor = net>=0?'var(--mint)':'var(--rose)';
   const netSign = net>=0?'+':'';
-
-  // Quick-adds
-  const qas=getQuickAdds();
-  const qaButtons = qas.map((q,i)=>`<div class="qa-btn" onclick="openQA(${i})"><span class="qa-ico">${q.icon||catIcon(q.cat)}</span><span class="qa-name">${q.name}</span><span class="qa-amt">${f$(q.amount)}</span></div>`).join('');
-  const qaAdd = qas.length<6?`<div class="qa-btn add-new" onclick="newQuickAdd()"><span class="qa-ico">＋</span><span class="qa-name">Add</span></div>`:'';
 
   // Budget bars
   const budgetBars = allCatNames().map(cat=>{
@@ -584,10 +595,7 @@ function homeHTML(){
 
     ${settleCard}
 
-    ${qas.length||true?`<div class="card" style="padding:13px">
-      <div class="card-title-row" style="margin-bottom:10px"><span class="card-title">⚡ Quick Add</span></div>
-      <div class="qa-row">${qaButtons}${qaAdd}</div>
-    </div>`:''}
+    ${cardStripHTML()}
 
     <div class="card">
       <div class="card-title-row">
@@ -619,12 +627,16 @@ function txRowHTML(t){
 
 // ─── ADD ──────────────────────────────────────────────────────────────────────
 function addHTML(){
+  const chooser=`<div class="addchooser">
+    ${[['expense','🧾 Expense'],['income','💰 Income'],['move','🌱 Move money']].map(([m,l])=>`<div class="seg-opt ${S.addMode===m?'on':''}" onclick="setAddMode('${m}')">${l}</div>`).join('')}
+  </div>`;
+  if(S.addMode==='income') return chooser+incomeInlineHTML();
+  if(S.addMode==='move') return chooser+moveHTML();
   const f=S.form, scanning=S.scanning;
   const catPills=allCatNames().map((c,i)=>`<div class="cpill ${f.cat===c?'on':''}" onclick="setForm('cat',allCatNames()[${i}])"><span class="ci">${catIcon(c)}</span>${esc(c)}</div>`).join('');
   const payerSeg=['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.payer===p?'on':''}" onclick="setForm('payer','${p}')">${p}</div>`).join('');
   const typeSeg=['One-time','Recurring'].map(p=>`<div class="seg-opt ${f.txType===p?'on':''}" onclick="setForm('txType','${p}')">${p}</div>`).join('');
-  return `
-    <div class="section-title">Log an expense</div>
+  return chooser+`
     <div class="card">
       <div class="fgroup">
         <button class="receipt-btn" onclick="triggerReceipt()" ${scanning?'disabled':''}>
@@ -636,6 +648,7 @@ function addHTML(){
       <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setForm('desc',this.value)"></div>
       <div class="fgroup"><label class="flabel">Category</label><div class="cpill-wrap">${catPills}</div></div>
       <div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>
+      ${(function(){const cards=S.accounts.filter(a=>a.Type==='credit');if(!cards.length)return '';const opts=[`<div class="seg-opt ${f.payWith==='cash'?'on':''}" onclick="setForm('payWith','cash')">💵 Cash/Debit</div>`].concat(cards.map(c=>`<div class="seg-opt ${f.payWith===c.ID?'on':''}" onclick="setForm('payWith','${c.ID}')">💳 ${esc(c.Name.replace('Credit Card','Card'))}</div>`));return `<div class="fgroup"><label class="flabel">Paid with</label><div class="seg">${opts.join('')}</div>${f.payWith!=='cash'?'<div style="font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:5px">💡 Card charges fill your card bar and count as spending only when you pay the card off.</div>':''}</div>`;})()}
       <div class="fgroup"><label class="flabel">Need or want?</label><div class="seg">${['Need','Want'].map(n=>`<div class="seg-opt ${f.need===n?'on':''}" onclick="setForm('need','${n}')">${n==='Need'?'🧺 Need':'✨ Want'}</div>`).join('')}</div></div>
       <div class="fgroup"><div class="cpill ${f.sub?'on':''}" onclick="setForm('sub',${!f.sub})" style="display:inline-flex"><span class="ci">📱</span>Subscription</div></div>
       <div class="fgroup"><label class="flabel">Type</label><div class="seg">${typeSeg}</div></div>
@@ -645,12 +658,46 @@ function addHTML(){
   `;
 }
 
+function incomeInlineHTML(){
+  const f=S.incomeForm;
+  return `<div class="card">
+    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${f.amount}" oninput="S.incomeForm.amount=this.value"></div>
+    <div class="fgroup"><label class="flabel">Description</label><input class="finput" type="text" placeholder="e.g. Paycheck" value="${esc(f.desc)}" oninput="S.incomeForm.desc=this.value"></div>
+    <div class="fgroup"><label class="flabel">Whose income?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.source===p?'on':''}" onclick="S.incomeForm.source='${p}';render()">${p}</div>`).join('')}</div></div>
+    <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="S.incomeForm.date=this.value"></div>
+    <button class="btn-primary" id="incBtn" onclick="submitIncome()">Add income</button>
+  </div>`;
+}
+
+function moveDestOptions(sel){
+  const opts=[`<option value="" ${!sel?'selected':''}>Choose destination…</option>`];
+  S.accounts.filter(a=>a.Type!=='credit').forEach(a=>opts.push(`<option value="a:${a.ID}" ${sel==='a:'+a.ID?'selected':''}>🏦 ${esc(a.Name)}</option>`));
+  S.goals.filter(g=>g.Type!=='debt').forEach(g=>opts.push(`<option value="g:${g.ID}" ${sel==='g:'+g.ID?'selected':''}>🎯 ${esc(g.Name)}</option>`));
+  return opts.join('');
+}
+function moveSourceOptions(sel){
+  const opts=[`<option value="" ${!sel?'selected':''}>(optional) from which account?</option>`];
+  S.accounts.filter(a=>a.Type!=='credit').forEach(a=>opts.push(`<option value="a:${a.ID}" ${sel==='a:'+a.ID?'selected':''}>🏦 ${esc(a.Name)}</option>`));
+  return opts.join('');
+}
+function moveHTML(){
+  const f=S.moveForm;
+  return `<div class="card">
+    <div class="fgroup"><label class="flabel">Direction</label><div class="seg">${[['in','🌱 Into savings'],['out','💸 Out of savings']].map(([d,l])=>`<div class="seg-opt ${f.dir===d?'on':''}" onclick="S.moveForm.dir='${d}';render()">${l}</div>`).join('')}</div></div>
+    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${f.amount}" oninput="S.moveForm.amount=this.value"></div>
+    <div class="fgroup"><label class="flabel">${f.dir==='in'?'Into which account or goal?':'Out of which account or goal?'}</label><select class="finput" onchange="S.moveForm.dest=this.value">${moveDestOptions(f.dest)}</select></div>
+    ${f.dir==='in'?`<div class="fgroup"><label class="flabel">From (optional)</label><select class="finput" onchange="S.moveForm.from=this.value">${moveSourceOptions(f.from)}</select></div>`:''}
+    <div class="fgroup"><label class="flabel">Whose money?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.moveForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
+    <button class="btn-primary" id="moveBtn" onclick="submitMove()">${f.dir==='in'?'Save this money 🌱':'Move it out'}</button>
+    <div style="font-size:10.5px;color:var(--txt3);font-weight:600;text-align:center;margin-top:8px">One-time transfer. For automatic recurring saving, use Settings → Recurring.</div>
+  </div>`;
+}
+
 // ─── TRENDS ───────────────────────────────────────────────────────────────────
 function trendsHTML(){
   const cats=catTotals();
   const hasCat=Object.values(cats).some(v=>v>0);
   return `
-    <div class="section-title">This month at a glance</div>
     ${sankeyHTML()}
     <div class="card">
       <div class="card-title-row"><span class="card-title">🍩 Where it went</span></div>
@@ -716,6 +763,12 @@ function recapHTML(){
     <div class="card" onclick="go('moneydate')" style="cursor:pointer;background:linear-gradient(135deg,var(--pink-soft),var(--yellow-soft))">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><div class="card-title">💞 Money date</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Close out the month together — 10 minutes</div></div>
+        <span style="font-size:20px;color:var(--txt3)">›</span>
+      </div>
+    </div>
+    <div class="card" onclick="go('income')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="card-title">💰 Income</div><div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-top:2px">Log paychecks & other income</div></div>
         <span style="font-size:20px;color:var(--txt3)">›</span>
       </div>
     </div>
@@ -792,7 +845,7 @@ function incomeHTML(){
     <div class="tx-amt" style="color:var(--mint)">+${f$(parseAmt(i.Amount))}</div>
   </div>`).join(''):`<div class="empty"><div class="empty-ico">💰</div><div class="empty-h">No income logged</div><div class="empty-s">Add paychecks, commercials, nanny gigs</div></div>`;
   return `
-    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Income</div>
+    <div class="section-title"><span onclick="go('home')" style="cursor:pointer;color:var(--pink)">‹ Home</span> · Income</div>
     <div class="total-card" style="background:linear-gradient(135deg,var(--mint-soft),var(--sky-soft))">
       <div class="total-eyebrow">Income · ${MONTHS[S.month-1]}</div>
       <div class="total-amount">${f$(inc.total)}</div>
@@ -814,29 +867,74 @@ function incomeHTML(){
 function goalsHTML(){
   const f=S.goalForm;
   const savings=S.goals.filter(g=>g.Type!=='debt');
+  const debts=byPerson(S.debts);
+  const cardAccts=byPerson(S.accounts).filter(a=>a.Type==='credit'&&a.Balance>0);
+  const start=debts.reduce((s,d)=>s+d.StartBalance,0);
+  const owed=debts.reduce((s,d)=>s+d.Balance,0);
+  const paidAll=Math.max(start-owed,0);
+  const meltPct=start>0?(owed/start)*100:0;
+  const next=strategyNext();
+  const allZeroApr=debts.filter(d=>d.Balance>0).every(d=>!d.APR);
+  const debtRow=d=>`<div class="debt">
+    <div class="debt-row"><div class="debt-name">${esc(d.Name)}${d.HighPriority?'<span class="debt-pri">priority</span>':''}</div><div class="debt-bal">${d.Balance<=0?'—':f$(d.Balance)}</div></div>
+    ${debtProjHTML(d)}
+    <div class="debt-actions">
+      ${d.Balance>0?`<button onclick="payDebt('${d.ID}','${esc(d.Name)}')">💸 Log payment</button>`:''}
+      <button onclick="editDebt('${d.ID}')">✏️ Edit</button>
+      <button onclick="removeDebt('${d.ID}')" style="flex:0 0 40px;color:var(--rose)">🗑</button>
+    </div>
+  </div>`;
   const goalCard=g=>{
     const pct=goalPct(g), saved=parseAmt(g.Saved), target=parseAmt(g.Target);
-    const isDebt=g.Type==='debt';
     const days=daysUntil(g.TargetDate);
     return `<div class="goal-card">
       <div class="goal-top">
-        <div><div class="goal-name">${esc(g.Name)}</div><span class="goal-type ${isDebt?'gt-debt':'gt-savings'}">${isDebt?'Debt':'Savings'}</span></div>
+        <div><div class="goal-name">${esc(g.Name)}</div><span class="goal-type gt-savings">Savings</span></div>
         <div class="goal-pct">${Math.round(pct)}%</div>
       </div>
-      <div class="track"><div class="track-fill ${pct<50?(isDebt?'danger':'safe'):pct<85?'warn':'safe'}" style="width:${pct}%"></div></div>
-      <div class="goal-nums"><span style="color:${isDebt?'var(--rose)':'var(--mint)'}">${isDebt?'Paid off ':''}${f$(saved)}</span><span style="color:var(--txt3)">${isDebt?'of ':'/ '}${f$(target)}${days?` · ${days}d`:''}</span></div>
+      <div class="track"><div class="track-fill ${pct<50?'safe':pct<85?'warn':'safe'}" style="width:${pct}%"></div></div>
+      <div class="goal-nums"><span style="color:var(--mint)">${f$(saved)}</span><span style="color:var(--txt3)">/ ${f$(target)}${days?` · ${days}d`:''}</span></div>
       <div class="goal-actions">
         <button onclick="contribute('${g.ID}','${esc(g.Name)}')">+ Add money</button>
         <button onclick="deleteGoal('${g.ID}')" style="flex:0 0 44px;color:var(--rose)">🗑</button>
       </div>
     </div>`;
   };
+  const cardDebtRow=c=>`<div class="debt">
+    <div class="debt-row"><div class="debt-name">💳 ${esc(c.Name)}</div><div class="debt-bal">${f$(c.Balance)}</div></div>
+    <div class="debt-proj">Credit card balance · <b onclick="payCardPrompt('${c.ID}','${esc(c.Name)}',${c.Balance})" style="color:var(--sky);cursor:pointer">tap Money to pay off</b></div>
+  </div>`;
+  const hasDebt=debts.length||cardAccts.length;
   return `
-    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Savings goals</div>
-    ${savings.length?savings.map(goalCard).join(''):`<div class="empty"><div class="empty-ico">🎯</div><div class="empty-h">No goals yet</div><div class="empty-s">Set a savings target — trips, emergency fund, nest egg</div></div>`}
-    <div style="font-size:11px;color:var(--txt3);font-weight:600;text-align:center;margin:2px 0 12px">Debts live in the 💎 Money tab now</div>
+    <div class="person-toggle">${['All','Ateeq','Celeste'].map(p=>`<div class="seg-opt ${S.person===p?'on':''}" onclick="setPerson('${p}')">${p==='All'?'👫 All':p==='Ateeq'?'🧔 Ateeq':'👩 Celeste'}</div>`).join('')}</div>
+
+    ${hasDebt?`<div class="card">
+      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">${S.debtFormOpen?'− Close':'＋ Add'}</button></div>
+      ${S.debtFormOpen?debtFormHTML():''}
+      ${start>0?`<div class="melt-wrap">
+        <div class="melt"><div class="melt-fill" style="width:${meltPct}%"></div></div>
+        <div class="melt-lbls"><span style="color:var(--mint);font-weight:700">${f0(paidAll)} crushed</span><span>${f0(owed)} to go</span></div>
+      </div>`:''}
+      ${debts.map(debtRow).join('')}
+      ${cardAccts.map(cardDebtRow).join('')}
+    </div>
+    ${next?`<div class="strategy">
+      <div class="card-title-row" style="margin-bottom:0"><span class="card-title">🧭 Extra dollars go to…</span>
+        <div class="seg" style="background:rgba(255,255,255,.6)">${['snowball','avalanche'].map(s=>`<div class="seg-opt ${S.strategy===s?'on':''}" onclick="setStrategy('${s}')">${s==='snowball'?'⛄ Snowball':'🏔️ Avalanche'}</div>`).join('')}</div>
+      </div>
+      <div class="strategy-msg">Next target: <b>${esc(next.Name)}</b> (${f0(next.Balance)})${S.strategy==='snowball'?' — smallest balance first for quick wins.':allZeroApr?' — add APRs (✏️ Edit) so avalanche can rank by interest rate.':' — highest interest rate first to save the most.'}</div>
+    </div>`:''}`:`<div class="card">
+      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">＋ Add</button></div>
+      ${S.debtFormOpen?debtFormHTML():`<div class="empty"><div class="empty-ico">🕊️</div><div class="empty-h">No debts</div><div class="empty-s">Nothing to pay off — living the dream</div></div>`}
+    </div>`}
+
     <div class="card">
-      <div class="card-title-row"><span class="card-title">New savings goal</span></div>
+      <div class="card-title-row"><span class="card-title">🌱 Saving toward</span><button class="card-toggle" onclick="setAddMode('move');go('add')">＋ Add money</button></div>
+      ${savings.length?savings.map(goalCard).join(''):`<div class="empty"><div class="empty-ico">🎯</div><div class="empty-h">No goals yet</div><div class="empty-s">Set a savings target — trips, emergency fund, nest egg</div></div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">🎯 New savings goal</span></div>
       <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="e.g. New York trip" value="${esc(f.name)}" oninput="setGoalForm('name',this.value)"></div>
       <div class="fgroup"><label class="flabel">Target amount</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.target}" oninput="setGoalForm('target',this.value)"></div>
       <div class="fgroup"><label class="flabel">Already saved (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.saved}" oninput="setGoalForm('saved',this.value)"></div>
@@ -912,7 +1010,7 @@ function sankeyHTML(){
 // ─── Plan (every dollar has a job) ───────────────────────────────────────────
 function planTotals(){
   const budgetTotal=Object.values(S.budgets).reduce((s,v)=>s+(+v||0),0);
-  const flowInvest=S.flows.filter(f=>f.Active&&f.FlowType==='invest').reduce((s,f)=>s+f.Amount,0);
+  const flowInvest=S.flows.filter(f=>f.Active&&f.FlowType==='invest').reduce((s,f)=>s+flowMonthly(f),0);
   const debtMins=S.debts.filter(d=>d.Balance>0).reduce((s,d)=>s+d.MinPayment,0);
   const income=incomeTotals().total;
   return {income,budgetTotal,flowInvest,debtMins,unalloc:income-(budgetTotal+flowInvest+debtMins)};
@@ -970,13 +1068,15 @@ function ringHTML(g){
   </div>`;
 }
 function moneyHTML(){
-  const accts=byPerson(S.accounts), debts=byPerson(S.debts);
+  const subtabs=`<div class="money-subtabs">${[['overview','💎 Overview'],['trends','📊 Trends']].map(([t,l])=>`<div class="seg-opt ${S.moneyTab===t?'on':''}" onclick="S.moneyTab='${t}';render()">${l}</div>`).join('')}</div>`;
+  if(S.moneyTab==='trends') return subtabs+trendsHTML();
+  const accts=byPerson(S.accounts).filter(a=>a.Type!=='credit');
+  const cardAccts=byPerson(S.accounts).filter(a=>a.Type==='credit');
+  const debts=byPerson(S.debts);
   const assets=accts.reduce((s,a)=>s+a.Balance,0);
-  const owed=debts.reduce((s,d)=>s+d.Balance,0);
+  const cardOwed=cardAccts.reduce((s,a)=>s+a.Balance,0);
+  const owed=debts.reduce((s,d)=>s+d.Balance,0)+cardOwed;
   const net=assets-owed;
-  const start=debts.reduce((s,d)=>s+d.StartBalance,0);
-  const paidAll=Math.max(start-owed,0);
-  const meltPct=start>0?(owed/start)*100:0;
   const acctRow=a=>{
     const fresh=a.LastReconciled&&a.LastReconciled.slice(0,7)===today().slice(0,7);
     return `<div class="acct" onclick="reconcile('${a.ID}','${esc(a.Name)}',${a.Balance})">
@@ -985,26 +1085,25 @@ function moneyHTML(){
       <div><div class="acct-bal">${f$(a.Balance)}</div><div class="acct-recon ${fresh?'':'stale'}">${fresh?'✓ reconciled':a.LastReconciled?'tap to reconcile':'tap to set balance'}</div></div>
     </div>`;
   };
-  const debtRow=d=>`<div class="debt">
-    <div class="debt-row"><div class="debt-name">${esc(d.Name)}${d.HighPriority?'<span class="debt-pri">priority</span>':''}</div><div class="debt-bal">${d.Balance<=0?'—':f$(d.Balance)}</div></div>
-    ${debtProjHTML(d)}
-    <div class="debt-actions">
-      ${d.Balance>0?`<button onclick="payDebt('${d.ID}','${esc(d.Name)}')">💸 Log payment</button>`:''}
-      <button onclick="editDebt('${d.ID}')">✏️ Edit</button>
-      <button onclick="removeDebt('${d.ID}')" style="flex:0 0 40px;color:var(--rose)">🗑</button>
-    </div>
-  </div>`;
-  const next=strategyNext();
-  const allZeroApr=debts.filter(d=>d.Balance>0).every(d=>!d.APR);
-  const savings=S.goals.filter(g=>g.Type!=='debt');
-  return `
+  const cardBlock=cardAccts.map(c=>{
+    const lim=c.Limit||0,used=c.Balance||0,pct=lim>0?Math.min((used/lim)*100,100):0;
+    const col=pct<30?'var(--mint)':pct<70?'#fbbf24':'var(--rose)';
+    return `<div class="card" onclick="payCardPrompt('${c.ID}','${esc(c.Name)}',${used})" style="cursor:pointer">
+      <div class="card-title-row" style="margin-bottom:2px"><span class="card-title">💳 ${esc(c.Name)}</span><span style="font-family:var(--mono);font-size:13px;font-weight:500;color:${col}">${f0(used)} / ${f0(lim)}</span></div>
+      <div class="util-wrap"><div class="util-bar"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="util-lbls"><span>${Math.round(pct)}% used${pct>=30?' · aim under 30%':''}</span><span>${used>0?'tap to pay off →':'paid off 🎉'}</span></div></div>
+    </div>`;
+  }).join('');
+  return subtabs+`
     <div class="person-toggle">${['All','Ateeq','Celeste'].map(p=>`<div class="seg-opt ${S.person===p?'on':''}" onclick="setPerson('${p}')">${p==='All'?'👫 All':p==='Ateeq'?'🧔 Ateeq':'👩 Celeste'}</div>`).join('')}</div>
 
     <div class="total-card" style="background:linear-gradient(135deg,var(--sky-soft),var(--mint-soft))">
-      <div class="total-eyebrow">${S.person==='All'?'Our':S.person+"'s"} money · right now</div>
+      <div class="total-eyebrow">${S.person==='All'?'Our':S.person+"'s"} net worth · right now</div>
       <div class="total-amount" style="color:${net>=0?'var(--txt)':'var(--rose)'}">${net<0?'-':''}${f$(Math.abs(net))}</div>
-      <div class="total-sub">${f0(assets)} in accounts − ${f0(owed)} debt 🐾</div>
+      <div class="total-sub">${f0(assets)} in accounts − ${f0(owed)} owed 🐾</div>
     </div>
+
+    ${cardBlock}
 
     <div class="card">
       <div class="card-title-row"><span class="card-title">🏦 Accounts</span><button class="card-toggle" onclick="S.acctFormOpen=!S.acctFormOpen;render()">${S.acctFormOpen?'− Close':'＋ Add'}</button></div>
@@ -1012,40 +1111,18 @@ function moneyHTML(){
       ${accts.length?accts.map(acctRow).join(''):`<div class="empty"><div class="empty-ico">🏦</div><div class="empty-h">No accounts yet</div><div class="empty-s">Add checking, the HYSA, 401ks…</div></div>`}
     </div>
 
-    ${debts.length?`<div class="card">
-      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">${S.debtFormOpen?'− Close':'＋ Add'}</button></div>
-      ${S.debtFormOpen?debtFormHTML():''}
-      <div class="melt-wrap">
-        <div class="melt"><div class="melt-fill" style="width:${meltPct}%"></div></div>
-        <div class="melt-lbls"><span style="color:var(--mint);font-weight:700">${f0(paidAll)} crushed</span><span>${f0(owed)} to go</span></div>
-      </div>
-      ${debts.map(debtRow).join('')}
-    </div>
-    ${next?`<div class="strategy">
-      <div class="card-title-row" style="margin-bottom:0"><span class="card-title">🧭 Extra dollars go to…</span>
-        <div class="seg" style="background:rgba(255,255,255,.6)">${['snowball','avalanche'].map(s=>`<div class="seg-opt ${S.strategy===s?'on':''}" onclick="setStrategy('${s}')">${s==='snowball'?'⛄ Snowball':'🏔️ Avalanche'}</div>`).join('')}</div>
-      </div>
-      <div class="strategy-msg">Next target: <b>${esc(next.Name)}</b> (${f0(next.Balance)})${S.strategy==='snowball'?' — smallest balance first for quick wins.':allZeroApr?' — add APRs (✏️ Edit) so avalanche can rank by interest rate.':' — highest interest rate first to save the most.'}</div>
-    </div>`:''}`:`<div class="card">
-      <div class="card-title-row"><span class="card-title">💳 Debt payoff</span><button class="card-toggle" onclick="S.debtFormOpen=!S.debtFormOpen;render()">＋ Add</button></div>
-      ${S.debtFormOpen?debtFormHTML():`<div class="empty"><div class="empty-ico">🕊️</div><div class="empty-h">No debts here</div><div class="empty-s">Nothing to pay off — living the dream</div></div>`}
-    </div>`}
-
-    ${savings.length?`<div class="card">
-      <div class="card-title-row"><span class="card-title">🌱 Saving toward</span><button class="card-toggle" onclick="go('goals')">Manage</button></div>
-      <div class="ring-row">${savings.map(ringHTML).join('')}</div>
-      <div style="font-size:10.5px;color:var(--txt3);font-weight:600;text-align:center;margin-top:8px">Tap a goal to add money</div>
-    </div>`:''}
+    <div style="font-size:11px;color:var(--txt3);font-weight:600;text-align:center;margin:4px 0 2px">Debts & savings goals live in the 🎯 Goals tab</div>
   `;
 }
 function acctFormHTML(){
   const f=S.acctForm;
+  const isCredit=f.type==='credit';
   return `<div style="background:var(--card2);border-radius:13px;padding:12px;margin-bottom:12px">
     <div class="fgroup"><label class="flabel">Account name</label><input class="finput" type="text" placeholder="e.g. Celeste's HYSA" value="${esc(f.name)}" oninput="S.acctForm.name=this.value"></div>
     <div class="fgroup"><label class="flabel">Whose?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.acctForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
-    <div class="fgroup"><label class="flabel">Type</label><select class="finput" onchange="S.acctForm.type=this.value">${Object.keys(ACCT_TYPES).map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${ACCT_TYPES[t]}</option>`).join('')}</select></div>
-    <div class="fgroup"><label class="flabel">Current balance</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.balance}" oninput="S.acctForm.balance=this.value"></div>
-    <div class="fgroup"><label class="flabel">APY % (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="e.g. 4.2" value="${f.apy}" oninput="S.acctForm.apy=this.value"></div>
+    <div class="fgroup"><label class="flabel">Type</label><select class="finput" onchange="S.acctForm.type=this.value;render()">${Object.keys(ACCT_TYPES).map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${ACCT_TYPES[t]}</option>`).join('')}</select></div>
+    <div class="fgroup"><label class="flabel">${isCredit?'Current balance owed':'Current balance'}</label><input class="finput" type="text" inputmode="decimal" placeholder="0.00" value="${f.balance}" oninput="S.acctForm.balance=this.value"></div>
+    ${isCredit?`<div class="fgroup"><label class="flabel">Credit limit</label><input class="finput" type="text" inputmode="decimal" placeholder="e.g. 1000" value="${f.limit}" oninput="S.acctForm.limit=this.value"></div>`:`<div class="fgroup"><label class="flabel">APY % (optional)</label><input class="finput" type="text" inputmode="decimal" placeholder="e.g. 4.2" value="${f.apy}" oninput="S.acctForm.apy=this.value"></div>`}
     <button class="btn-primary" onclick="submitAccount()">Add account</button>
   </div>`;
 }
@@ -1076,31 +1153,38 @@ function flowDestName(f){
 }
 function settingsHTML(){
   const f=S.flowForm;
-  const flowRow=fl=>`<div class="flow">
+  const flowRow=fl=>{
+    const freqLbl=FREQS[fl.Frequency]||'Monthly';
+    const permo=flowMonthly(fl);
+    const amtLabel=fl.Frequency==='monthly'?`${f0(fl.Amount)}/mo`:`${f0(fl.Amount)}/${fl.Frequency==='weekly'?'wk':fl.Frequency==='biweekly'?'2wk':'½mo'}`;
+    return `<div class="flow">
     <div class="flow-body" onclick="removeFlow('${fl.ID}')"><div class="flow-name">${fl.FlowType==='invest'?'🌱':'📤'} ${esc(fl.Name)}</div>
-    <div class="flow-meta">${fl.FlowType==='invest'?'Invest':'Divest'} · ${esc(flowDestName(fl))||'untracked'} · day ${fl.DayOfMonth} · ${fl.Owner}</div></div>
-    <div class="flow-amt ${fl.FlowType}">${fl.FlowType==='invest'?'+':'−'}${f0(fl.Amount)}/mo</div>
+    <div class="flow-meta">${fl.FlowType==='invest'?'Invest':'Divest'} · ${esc(flowDestName(fl))||'untracked'} · ${freqLbl} · ${fl.Owner}</div></div>
+    <div class="flow-amt ${fl.FlowType}">${fl.FlowType==='invest'?'+':'−'}${amtLabel}</div>
     <div class="switch ${fl.Active?'on':''}" onclick="toggleFlow('${fl.ID}',${fl.Active})"></div>
   </div>`;
-  const monthlyIn=S.flows.filter(x=>x.Active&&x.FlowType==='invest').reduce((s,x)=>s+x.Amount,0);
-  const monthlyOut=S.flows.filter(x=>x.Active&&x.FlowType==='divest').reduce((s,x)=>s+x.Amount,0);
+  };
+  const monthlyIn=S.flows.filter(x=>x.Active&&x.FlowType==='invest').reduce((s,x)=>s+flowMonthly(x),0);
+  const monthlyOut=S.flows.filter(x=>x.Active&&x.FlowType==='divest').reduce((s,x)=>s+flowMonthly(x),0);
+  const freqMoNote = f.amount&&!isNaN(parseFloat(f.amount))&&f.frequency!=='monthly' ? `<div style="font-size:10.5px;color:var(--sky);font-weight:700;margin-top:5px">≈ ${f0(flowMonthly({Amount:parseFloat(f.amount),Frequency:f.frequency}))}/month</div>` : '';
   return `
-    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Settings</div>
+    <div class="section-title">⚙️ Settings</div>
 
     <div class="card">
       <div class="card-title-row"><span class="card-title">🔁 Recurring investments & divestments</span></div>
-      <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Auto-logged monthly on their day. Investing ${f0(monthlyIn)}/mo${monthlyOut?`, divesting ${f0(monthlyOut)}/mo`:''}.</div>
-      ${S.flows.length?S.flows.map(flowRow).join(''):`<div class="empty" style="padding:18px"><div class="empty-ico">🔁</div><div class="empty-h">No recurring flows yet</div><div class="empty-s">e.g. $200 → Celeste's HYSA on the 1st</div></div>`}
+      <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Auto-logged on schedule. Investing ~${f0(monthlyIn)}/mo${monthlyOut?`, divesting ~${f0(monthlyOut)}/mo`:''}.</div>
+      ${S.flows.length?S.flows.map(flowRow).join(''):`<div class="empty" style="padding:18px"><div class="empty-ico">🔁</div><div class="empty-h">No recurring flows yet</div><div class="empty-s">e.g. $50/week → Roth IRA</div></div>`}
     </div>
 
     <div class="card">
       <div class="card-title-row"><span class="card-title">＋ New recurring flow</span></div>
-      <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="e.g. HYSA auto-save" value="${esc(f.name)}" oninput="S.flowForm.name=this.value"></div>
+      <div class="fgroup"><label class="flabel">Name</label><input class="finput" type="text" placeholder="e.g. Roth auto-invest" value="${esc(f.name)}" oninput="S.flowForm.name=this.value"></div>
       <div class="fgroup"><label class="flabel">Type</label><div class="seg">${[['invest','🌱 Invest'],['divest','📤 Divest']].map(([t,l])=>`<div class="seg-opt ${f.flowType===t?'on':''}" onclick="S.flowForm.flowType='${t}';render()">${l}</div>`).join('')}</div></div>
-      <div class="fgroup"><label class="flabel">Amount / month</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${f.amount}" oninput="S.flowForm.amount=this.value"></div>
+      <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${f.amount}" oninput="S.flowForm.amount=this.value">${freqMoNote}</div>
+      <div class="fgroup"><label class="flabel">How often?</label><div class="seg">${Object.entries(FREQS).map(([k,l])=>`<div class="seg-opt ${f.frequency===k?'on':''}" onclick="S.flowForm.frequency='${k}';render()" style="font-size:10.5px">${l}</div>`).join('')}</div></div>
       <div class="fgroup"><label class="flabel">${f.flowType==='invest'?'Into which account or goal?':'Out of which account?'}</label><select class="finput" onchange="S.flowForm.dest=this.value">${destOptions(f.dest)}</select></div>
       <div class="fgroup"><label class="flabel">Whose money?</label><div class="seg">${['Ateeq','Celeste','Both'].map(p=>`<div class="seg-opt ${f.owner===p?'on':''}" onclick="S.flowForm.owner='${p}';render()">${p}</div>`).join('')}</div></div>
-      <div class="fgroup"><label class="flabel">Day of month (1–28)</label><input class="finput" type="number" min="1" max="28" value="${f.day}" oninput="S.flowForm.day=this.value"></div>
+      ${f.frequency==='monthly'?`<div class="fgroup"><label class="flabel">Day of month (1–28)</label><input class="finput" type="number" min="1" max="28" value="${f.day}" oninput="S.flowForm.day=this.value"></div>`:''}
       <button class="btn-primary" onclick="submitFlow()">Add recurring flow</button>
     </div>
 
@@ -1150,7 +1234,7 @@ function moneydateHTML(){
   const doneCount=steps.filter(s=>s.done).length;
   if(doneCount===3&&!st.celebrated){ const s2=mdState(); s2.celebrated=true; localStorage.setItem(mdKey(),JSON.stringify(s2)); confettiBurst(); }
   return `
-    <div class="section-title"><span onclick="go('more')" style="cursor:pointer;color:var(--pink)">‹ More</span> · Money date 💞</div>
+    <div class="section-title"><span onclick="go('recap')" style="cursor:pointer;color:var(--pink)">‹ Recap</span> · Money date 💞</div>
     <div class="total-card" style="background:linear-gradient(135deg,var(--pink-soft),var(--yellow-soft))">
       <div class="total-eyebrow">${MONTHS[new Date().getMonth()]} check-in</div>
       <div class="total-amount">${doneCount}/3</div>
@@ -1256,11 +1340,17 @@ async function submitTx(){
   if(!f.amount||isNaN(parseFloat(f.amount))){ showToast('⚠️ Enter an amount'); return; }
   if(!f.desc.trim()){ showToast('⚠️ Add a description'); return; }
   const btn=document.getElementById('saveBtn'); if(btn)btn.disabled=true;
-  const d=await api({action:'addTransaction',date:f.date,description:f.desc,category:f.cat,paidBy:f.payer,amount:f.amount,txType:f.txType,notes:f.notes,receiptUrl:f.receiptUrl,need:f.need,sub:f.sub?'yes':''});
+  let d;
+  if(f.payWith&&f.payWith!=='cash'){
+    // charge to a credit card: queues on the card, doesn't count as spending yet
+    d=await api({action:'chargeCard',accountId:f.payWith,date:f.date,description:f.desc,category:f.cat,paidBy:f.payer,amount:f.amount,notes:f.notes});
+  } else {
+    d=await api({action:'addTransaction',date:f.date,description:f.desc,category:f.cat,paidBy:f.payer,amount:f.amount,txType:f.txType,notes:f.notes,receiptUrl:f.receiptUrl,need:f.need,sub:f.sub?'yes':''});
+  }
   if(btn)btn.disabled=false;
   if(d?.success){
-    showToast('✅ Added!');
-    S.form={ desc:'',amount:'',cat:f.cat,payer:f.payer,txType:'One-time',date:today(),notes:'',receiptUrl:'',need:'Need',sub:false };
+    showToast(f.payWith&&f.payWith!=='cash'?'💳 Charged to card':'✅ Added!');
+    S.form={ desc:'',amount:'',cat:f.cat,payer:f.payer,txType:'One-time',date:today(),notes:'',receiptUrl:'',need:'Need',sub:false,payWith:f.payWith };
     go('home'); load();
   } else showToast('⚠️ '+(d?.error?String(d.error).slice(0,40):'Failed — run setup() in Apps Script'));
 }
@@ -1337,8 +1427,8 @@ async function submitFlow(){
   if(!f.name.trim()||!f.amount||isNaN(parseFloat(f.amount))){ showToast('⚠️ Name + amount needed'); return; }
   const accountId=f.dest.startsWith('a:')?f.dest.slice(2):'';
   const goalId=f.dest.startsWith('g:')?f.dest.slice(2):'';
-  const d=await api({action:'addFlow',name:f.name,flowType:f.flowType,amount:f.amount,owner:f.owner,accountId,goalId,day:f.day||'1'});
-  if(d?.success){ showToast('🔁 Recurring flow added'); S.flowForm={name:'',amount:'',flowType:'invest',owner:'Both',dest:'',day:'1'}; load(); }
+  const d=await api({action:'addFlow',name:f.name,flowType:f.flowType,amount:f.amount,owner:f.owner,accountId,goalId,day:f.day||'1',frequency:f.frequency||'monthly'});
+  if(d?.success){ showToast('🔁 Recurring flow added'); S.flowForm={name:'',amount:'',flowType:'invest',owner:'Both',dest:'',day:'1',frequency:'monthly'}; load(); }
 }
 async function toggleFlow(id,active){
   const d=await api({action:'updateFlow',id,active:active?'no':'yes'});
@@ -1381,17 +1471,56 @@ function editTx(id){
   }
 }
 
-// Quick adds
-function newQuickAdd(){
-  const name=prompt('Shortcut name (e.g. Jewel-Osco):'); if(!name)return;
-  const amount=prompt('Amount:'); if(!amount||isNaN(parseFloat(amount)))return;
-  const q=getQuickAdds(); q.push({name,amount:parseFloat(amount),cat:'Groceries',payer:'Ateeq',icon:''}); setQuickAdds(q); render();
+// ─── Add chooser: Expense / Income / Move money ──────────────────────────────
+function openAdd(){ S.addMode='expense'; go('add'); }
+function setAddMode(m){ S.addMode=m; render(); }
+
+// ─── Credit card strip (Home) + Money card view ──────────────────────────────
+function cards(){ return S.accounts.filter(a=>a.Type==='credit'); }
+function cardStripHTML(){
+  const cs=cards(); if(!cs.length) return '';
+  return cs.map(c=>{
+    const lim=c.Limit||0, used=c.Balance||0;
+    const pct=lim>0?Math.min((used/lim)*100,100):0;
+    const col=pct<30?'var(--mint)':pct<70?'#fbbf24':'var(--rose)';
+    return `<div class="card" onclick="payCardPrompt('${c.ID}','${esc(c.Name)}',${used})" style="cursor:pointer">
+      <div class="card-title-row" style="margin-bottom:2px"><span class="card-title">💳 ${esc(c.Name)}</span><span style="font-family:var(--mono);font-size:13px;font-weight:500;color:${col}">${f0(used)} / ${f0(lim)}</span></div>
+      <div class="util-wrap"><div class="util-bar"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="util-lbls"><span>${Math.round(pct)}% used</span><span>${used>0?'tap to pay off →':'paid off 🎉'}</span></div></div>
+    </div>`;
+  }).join('');
 }
-function openQA(i){ S.qaModal={...getQuickAdds()[i]}; render(); }
-async function confirmQA(){
-  const q=S.qaModal; S.qaModal=null; render();
-  const d=await api({action:'addTransaction',date:today(),description:q.name,category:q.cat,paidBy:q.payer||'Ateeq',amount:String(q.amount),txType:'One-time',notes:'QUICK_ADD'});
-  if(d?.success){ showToast('✅ '+q.name+' logged'); load(); }
+async function payCardPrompt(cardId,name,used){
+  if(used<=0){ showToast('🎉 Nothing owed on this card'); return; }
+  const v=prompt(`Pay off "${name}" — balance ${f0(used)}.\nHow much are you paying?`, used.toFixed(2));
+  if(v===null||isNaN(parseFloat(v))||parseFloat(v)<=0) return;
+  let fromId='';
+  const spend=S.accounts.filter(a=>a.Type==='checking'||a.Type==='savings'||a.Type==='hysa');
+  if(spend.length){
+    const list=spend.map((a,i)=>`${i+1} = ${a.Name}`).join('\n');
+    const pick=prompt(`Pay from which account? (blank = don't track source)\n${list}`,'1');
+    const idx=parseInt(pick)-1; if(!isNaN(idx)&&spend[idx]) fromId=spend[idx].ID;
+  }
+  const d=await api({action:'payCard',accountId:cardId,amount:v,fromAccountId:fromId});
+  if(d?.success){ showToast(`💳 Paid ${f0(d.paid)} · ${d.settled} charge${d.settled!==1?'s':''} now counted`); load(); }
+  else showToast('⚠️ '+(d?.error||'Failed'));
+}
+
+// ─── Move money (one-time savings/transfer) ──────────────────────────────────
+async function submitMove(){
+  const f=S.moveForm;
+  if(!f.amount||isNaN(parseFloat(f.amount))||parseFloat(f.amount)<=0){ showToast('⚠️ Enter an amount'); return; }
+  const btn=document.getElementById('moveBtn'); if(btn)btn.disabled=true;
+  const accountId=f.dest.startsWith('a:')?f.dest.slice(2):'';
+  const goalId=f.dest.startsWith('g:')?f.dest.slice(2):'';
+  const fromId=f.from.startsWith('a:')?f.from.slice(2):'';
+  // money in = invest into dest; money out = divest from dest
+  const d=await api({action:'addContribution',flowType:f.dir==='in'?'invest':'divest',amount:f.amount,accountId,goalId,owner:f.owner,notes:'Manual move'});
+  // if moving in and a source account was chosen, pull it down too
+  if(d?.success && f.dir==='in' && fromId){ await api({action:'addContribution',flowType:'divest',amount:f.amount,accountId:fromId,owner:f.owner,notes:'Move source'}); }
+  if(btn)btn.disabled=false;
+  if(d?.success){ showToast(f.dir==='in'?'🌱 Money saved!':'💸 Money moved out'); S.moveForm={amount:'',dir:'in',dest:'',from:'',owner:'Both'}; go('goals'); load(); }
+  else showToast('⚠️ '+(d?.error||'Failed'));
 }
 
 function setBudgetIdx(i,v){
