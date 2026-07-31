@@ -19,6 +19,7 @@ const RECON_SHEET   = "Reconciles";     // balance check-in history
 const DEBT_SHEET    = "Debts";          // debts with live balances
 const DEBTPAY_SHEET = "DebtPayments";   // payment history per debt
 const FLOWS_SHEET   = "RecurringFlows"; // recurring investments / divestments
+const CARDCHG_SHEET = "CardCharges";    // queued credit-card charges (holding tank)
 const CONTRIB_SHEET = "Contributions";  // money moved into accounts/goals (or out)
 const DRIVE_FOLDER  = "PatchinPennies Receipts";
 
@@ -40,7 +41,8 @@ function getAll(month,year){
     debts: d.debts,
     payments: d.payments,
     flows: getFlows().flows,
-    contributions: getContributions(month,year).contributions
+    contributions: getContributions(month,year).contributions,
+    cardCharges: getCardCharges().charges
   };
 }
 
@@ -84,7 +86,11 @@ function doGet(e){
       // Contributions
       case "getContributions":   r=getContributions(e.parameter.month,e.parameter.year); break;
       case "addContribution":    r=addContribution(e.parameter); break;
-      case "ping":               r={ok:true,version:3}; break;
+      // Credit card
+      case "getCardCharges":     r=getCardCharges(); break;
+      case "chargeCard":         r=chargeCard(e.parameter); break;
+      case "payCard":            r=payCard(e.parameter); break;
+      case "ping":               r={ok:true,version:4}; break;
       default:                   r={error:"Unknown action: "+a};
     }
   }catch(err){ r={error:String(err)}; }
@@ -136,13 +142,16 @@ function setup(){
   // Accounts
   let ac=book.getSheetByName(ACCT_SHEET);
   const acNew=!ac;
-  if(!ac){ ac=book.insertSheet(ACCT_SHEET); ac.appendRow(["ID","Name","Owner","Type","Balance","APY","LastReconciled","Created"]); ac.getRange(1,1,1,8).setFontWeight("bold"); }
+  if(!ac){ ac=book.insertSheet(ACCT_SHEET); ac.appendRow(["ID","Name","Owner","Type","Balance","APY","LastReconciled","Created","Limit"]); ac.getRange(1,1,1,9).setFontWeight("bold"); }
+  else ensureCols(ac,["ID","Name","Owner","Type","Balance","APY","LastReconciled","Created","Limit"]);
   if(acNew || ac.getLastRow()<2){
-    [["Celeste's HYSA","Celeste","hysa",0,4.2],
-     ["Checking","Both","checking",0,0],
-     ["401k — Celeste","Celeste","retirement",0,0],
-     ["401k — Ateeq","Ateeq","retirement",0,0]].forEach(r=>{
-      ac.appendRow([Utilities.getUuid(),r[0],r[1],r[2],r[3],r[4],"",todayStr()]);
+    [["Celeste's HYSA","Celeste","hysa",0,4.2,0],
+     ["Checking","Both","checking",0,0,0],
+     ["Roth IRA — Ateeq","Ateeq","investment",0,0,0],
+     ["401k — Celeste","Celeste","retirement",0,0,0],
+     ["401k — Ateeq","Ateeq","retirement",0,0,0],
+     ["Credit Card - Ateeq","Ateeq","credit",0,0,1000]].forEach(r=>{
+      ac.appendRow([Utilities.getUuid(),r[0],r[1],r[2],r[3],r[4],"",todayStr(),r[5]]);
     });
   }
   // Reconciles
@@ -171,7 +180,11 @@ function setup(){
   }
   // Recurring flows + contributions
   let fl=book.getSheetByName(FLOWS_SHEET);
-  if(!fl){ fl=book.insertSheet(FLOWS_SHEET); fl.appendRow(["ID","Name","FlowType","Amount","Owner","AccountID","GoalID","DayOfMonth","Active","Created"]); fl.getRange(1,1,1,10).setFontWeight("bold"); }
+  if(!fl){ fl=book.insertSheet(FLOWS_SHEET); fl.appendRow(["ID","Name","FlowType","Amount","Owner","AccountID","GoalID","DayOfMonth","Active","Created","Frequency","LastRun"]); fl.getRange(1,1,1,12).setFontWeight("bold"); }
+  else ensureCols(fl,["ID","Name","FlowType","Amount","Owner","AccountID","GoalID","DayOfMonth","Active","Created","Frequency","LastRun"]);
+  // Credit-card charge queue (holding tank)
+  let cc=book.getSheetByName(CARDCHG_SHEET);
+  if(!cc){ cc=book.insertSheet(CARDCHG_SHEET); cc.appendRow(["ID","AccountID","Date","Description","Category","PaidBy","Amount","Settled","Notes"]); cc.getRange(1,1,1,9).setFontWeight("bold"); }
   let co=book.getSheetByName(CONTRIB_SHEET);
   if(!co){ co=book.insertSheet(CONTRIB_SHEET); co.appendRow(["ID","Date","FlowType","Amount","AccountID","GoalID","Owner","Notes","Source"]); co.getRange(1,1,1,9).setFontWeight("bold"); }
   return "Setup complete. Now run installTriggers() once (safe to re-run too).";
@@ -334,19 +347,19 @@ function deleteGoal(id){ return deleteRowById(sheet(GOALS_SHEET),id)?{success:tr
 function getAccounts(){
   const out=rowsAsObjects(sheet(ACCT_SHEET)).map(a=>({
     ID:a.ID, Name:a.Name, Owner:a.Owner||"Both", Type:a.Type||"checking",
-    Balance:num(a.Balance), APY:num(a.APY), LastReconciled:a.LastReconciled?fmtDate(a.LastReconciled):""
+    Balance:num(a.Balance), APY:num(a.APY), LastReconciled:a.LastReconciled?fmtDate(a.LastReconciled):"", Limit:num(a.Limit)
   }));
   return {accounts:out};
 }
 function addAccount(p){
   const sh=sheet(ACCT_SHEET); const id=uuid();
-  sh.appendRow([id,p.name||"Account",p.owner||"Both",p.type||"checking",num(p.balance||0),num(p.apy||0),p.balance?todayStr():"",todayStr()]);
+  sh.appendRow([id,p.name||"Account",p.owner||"Both",p.type||"checking",num(p.balance||0),num(p.apy||0),p.balance?todayStr():"",todayStr(),num(p.limit||0)]);
   return {success:true,id};
 }
 function updateAccount(p){
   const found=updateRowById(sheet(ACCT_SHEET),p.id,Object.assign({},
     p.name?{Name:p.name}:{}, p.owner?{Owner:p.owner}:{}, p.type?{Type:p.type}:{},
-    p.apy!=null?{APY:num(p.apy)}:{}, p.balance!=null?{Balance:num(p.balance)}:{}));
+    p.apy!=null?{APY:num(p.apy)}:{}, p.balance!=null?{Balance:num(p.balance)}:{}, p.limit!=null?{Limit:num(p.limit)}:{}));
   return found?{success:true}:{error:"Not found"};
 }
 function deleteAccount(id){ return deleteRowById(sheet(ACCT_SHEET),id)?{success:true}:{error:"Not found"}; }
@@ -410,14 +423,16 @@ function getFlows(){
     ID:f.ID, Name:f.Name, FlowType:f.FlowType||"invest", Amount:num(f.Amount),
     Owner:f.Owner||"Both", AccountID:f.AccountID||"", GoalID:f.GoalID||"",
     DayOfMonth:Math.min(Math.max(parseInt(f.DayOfMonth)||1,1),28),
+    Frequency:(f.Frequency||"monthly"), LastRun:f.LastRun?fmtDate(f.LastRun):"",
     Active:String(f.Active||"yes").toLowerCase()!=="no"
   }));
   return {flows:out};
 }
 function addFlow(p){
   const sh=sheet(FLOWS_SHEET); const id=uuid();
+  const freq=["weekly","biweekly","semimonthly","monthly"].indexOf(p.frequency)>-1?p.frequency:"monthly";
   sh.appendRow([id,p.name||"Flow",p.flowType==="divest"?"divest":"invest",num(p.amount),
-    p.owner||"Both",p.accountId||"",p.goalId||"",Math.min(Math.max(parseInt(p.day)||1,1),28),"yes",todayStr()]);
+    p.owner||"Both",p.accountId||"",p.goalId||"",Math.min(Math.max(parseInt(p.day)||1,1),28),"yes",todayStr(),freq,""]);
   return {success:true,id};
 }
 function updateFlow(p){
@@ -426,27 +441,102 @@ function updateFlow(p){
     p.amount!=null?{Amount:num(p.amount)}:{}, p.owner?{Owner:p.owner}:{},
     p.accountId!=null?{AccountID:p.accountId}:{}, p.goalId!=null?{GoalID:p.goalId}:{},
     p.day!=null?{DayOfMonth:Math.min(Math.max(parseInt(p.day)||1,1),28)}:{},
+    p.frequency?{Frequency:p.frequency}:{},
     p.active!=null?{Active:p.active==="no"?"no":"yes"}:{}));
   return found?{success:true}:{error:"Not found"};
 }
 function deleteFlow(id){ return deleteRowById(sheet(FLOWS_SHEET),id)?{success:true}:{error:"Not found"}; }
 
-// Runs daily; executes any active flow whose DayOfMonth is today and hasn't run this month.
+// Approx monthly equivalent of a flow (for planning math on the client too)
+function flowMonthly(f){
+  switch(f.Frequency){
+    case "weekly": return f.Amount*52/12;
+    case "biweekly": return f.Amount*26/12;
+    case "semimonthly": return f.Amount*2;
+    default: return f.Amount;
+  }
+}
+// Runs daily; fires any active flow that's due since its LastRun given its frequency.
 function autoLogFlows(){ runFlows(new Date()); }
+function daysBetween(a,b){ return Math.floor((b-a)/86400000); }
 function runFlows(now){
+  const sh=sheet(FLOWS_SHEET);
   const flows=getFlows().flows.filter(f=>f.Active);
-  const m=now.getMonth()+1, y=now.getFullYear(), day=now.getDate();
-  const contribs=rowsAsObjects(sheet(CONTRIB_SHEET));
   let ran=0;
   flows.forEach(f=>{
-    if(day<f.DayOfMonth) return; // not due yet this month
-    const already=contribs.some(c=>String(c.Notes||"").indexOf("FLOW:"+f.ID)>-1 && monthMatch(c.Date,m,y));
-    if(already) return;
+    const last=f.LastRun?new Date(f.LastRun):null;
+    let due=false;
+    if(f.Frequency==="weekly")      due=!last||daysBetween(last,now)>=7;
+    else if(f.Frequency==="biweekly")due=!last||daysBetween(last,now)>=14;
+    else if(f.Frequency==="semimonthly"){ const d=now.getDate(); const key=now.getFullYear()+"-"+(now.getMonth()+1); const lastKey=last?last.getFullYear()+"-"+(last.getMonth()+1):""; const half=d>=1&&d<15?"a":"b"; const lastHalf=last?(last.getDate()<15?"a":"b"):""; due=!last||(key+half)!==(lastKey+lastHalf); }
+    else { due=!last||now.getMonth()!==last.getMonth()||now.getFullYear()!==last.getFullYear(); if(due&&now.getDate()<f.DayOfMonth&&(!last||now.getMonth()===last.getMonth())) due=false; }
+    if(!due) return;
     addContribution({flowType:f.FlowType,amount:f.Amount,accountId:f.AccountID,goalId:f.GoalID,owner:f.Owner,
       notes:"FLOW:"+f.ID+" "+f.Name,source:"auto"});
+    updateRowById(sh,f.ID,{LastRun:todayStr()});
     ran++;
   });
   return {success:true, ran:ran};
+}
+
+// ─── Credit-card holding tank ───────────────────────────────────────────────
+// A charge raises the card's Balance and queues a row (unsettled). It does NOT
+// count as spending yet. Paying the card settles oldest charges first; settled
+// charges become real Transactions "as charged", preserving category.
+function getCardCharges(){
+  const out=rowsAsObjects(sheet(CARDCHG_SHEET)).map(c=>({
+    ID:c.ID, AccountID:c.AccountID, Date:fmtDate(c.Date), Description:c.Description,
+    Category:c.Category, PaidBy:c.PaidBy||"Ateeq", Amount:num(c.Amount),
+    Settled:String(c.Settled||"no").toLowerCase()==="yes"
+  }));
+  return {charges:out};
+}
+function chargeCard(p){
+  const sh=sheet(ACCT_SHEET);
+  const cardId=p.accountId;
+  if(getCell(sh,cardId,"ID")===null) return {error:"Card not found"};
+  const amt=num(p.amount);
+  const cur=num(getCell(sh,cardId,"Balance"));
+  updateRowById(sh,cardId,{Balance:cur+amt});
+  sheet(CARDCHG_SHEET).appendRow([uuid(),cardId,p.date||todayStr(),p.description||"",p.category||"Personal/Misc",p.paidBy||"Ateeq",amt,"no",p.notes||""]);
+  const lim=num(getCell(sh,cardId,"Limit"));
+  return {success:true, balance:cur+amt, limit:lim};
+}
+// Pay down the card. Lowers Balance, settles oldest unsettled charges up to the
+// paid amount, and turns each fully-settled charge into a real Transaction.
+function payCard(p){
+  const acc=sheet(ACCT_SHEET); const cardId=p.accountId;
+  if(getCell(acc,cardId,"ID")===null) return {error:"Card not found"};
+  let pay=num(p.amount);
+  const bal=num(getCell(acc,cardId,"Balance"));
+  const applied=Math.min(pay,bal);
+  updateRowById(acc,cardId,{Balance:bal-applied});
+  // pull checking down if specified
+  if(p.fromAccountId){ const fc=num(getCell(acc,p.fromAccountId,"Balance")); if(getCell(acc,p.fromAccountId,"ID")!==null) updateRowById(acc,p.fromAccountId,{Balance:fc-applied}); }
+  // settle oldest first
+  const cs=sheet(CARDCHG_SHEET); const data=cs.getDataRange().getValues(); const hdr=data[0].map(String);
+  const iId=hdr.indexOf("ID"),iAcc=hdr.indexOf("AccountID"),iSettled=hdr.indexOf("Settled"),iAmt=hdr.indexOf("Amount"),
+        iDate=hdr.indexOf("Date"),iDesc=hdr.indexOf("Description"),iCat=hdr.indexOf("Category"),iPaidBy=hdr.indexOf("PaidBy");
+  let remaining=applied, settledCount=0;
+  for(let i=1;i<data.length && remaining>0.001;i++){
+    if(String(data[i][iAcc])!==String(cardId)) continue;
+    if(String(data[i][iSettled]).toLowerCase()==="yes") continue;
+    const amt=num(data[i][iAmt]);
+    if(amt<=remaining+0.001){
+      // fully settle → becomes a real transaction "as charged"
+      cs.getRange(i+1,iSettled+1).setValue("yes");
+      addTransaction({date:data[i][iDate],description:data[i][iDesc]||"Card charge",category:data[i][iCat]||"Personal/Misc",
+        paidBy:data[i][iPaidBy]||"Ateeq",amount:amt,txType:"One-time",notes:"CARD_SETTLED",need:"",sub:""});
+      remaining-=amt; settledCount++;
+    } else {
+      // partial: split the charge — settle `remaining`, leave the rest queued
+      cs.getRange(i+1,iAmt+1).setValue(amt-remaining);
+      addTransaction({date:data[i][iDate],description:(data[i][iDesc]||"Card charge")+" (partial)",category:data[i][iCat]||"Personal/Misc",
+        paidBy:data[i][iPaidBy]||"Ateeq",amount:remaining,txType:"One-time",notes:"CARD_SETTLED",need:"",sub:""});
+      remaining=0; settledCount++;
+    }
+  }
+  return {success:true, paid:applied, newBalance:bal-applied, settled:settledCount};
 }
 
 // ─── Contributions ──────────────────────────────────────────────────────────
