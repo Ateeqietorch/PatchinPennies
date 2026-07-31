@@ -1012,8 +1012,11 @@ function planTotals(){
   const budgetTotal=Object.values(S.budgets).reduce((s,v)=>s+(+v||0),0);
   const flowInvest=S.flows.filter(f=>f.Active&&f.FlowType==='invest').reduce((s,f)=>s+flowMonthly(f),0);
   const debtMins=S.debts.filter(d=>d.Balance>0).reduce((s,d)=>s+d.MinPayment,0);
+  // One-time saving this month (manual "Move money" into savings), minus any pulled back out.
+  // Recurring flows are already counted via flowInvest, so exclude auto FLOW contributions here.
+  const oneTimeSaved=S.contribs.filter(c=>c.Source!=='auto').reduce((s,c)=>s+(c.FlowType==='invest'?c.Amount:-c.Amount),0);
   const income=incomeTotals().total;
-  return {income,budgetTotal,flowInvest,debtMins,unalloc:income-(budgetTotal+flowInvest+debtMins)};
+  return {income,budgetTotal,flowInvest,debtMins,oneTimeSaved,unalloc:income-(budgetTotal+flowInvest+debtMins+Math.max(oneTimeSaved,0))};
 }
 function planCardHTML(){
   const p=planTotals();
@@ -1021,7 +1024,7 @@ function planCardHTML(){
   const u=Math.round(p.unalloc);
   let bg,title,sub,color;
   if(Math.abs(u)<1){ bg='linear-gradient(135deg,var(--mint-soft),var(--sky-soft))'; title='Every dollar has a job 🎉'; sub='Income fully allocated across budgets, savings & debt'; color='var(--mint)'; }
-  else if(u>0){ bg='linear-gradient(135deg,var(--yellow-soft),var(--peach-soft))'; title='Money without a job'; sub='Give it one: raise a budget, a flow, or a debt payment in Settings'; color='var(--peach)'; }
+  else if(u>0){ bg='linear-gradient(135deg,var(--yellow-soft),var(--peach-soft))'; title='Money left to spend'; sub='Unassigned after budgets, saving & debt — give it a job or move it to savings'; color='var(--peach)'; }
   else { bg='linear-gradient(135deg,var(--rose-soft),var(--pink-soft))'; title='Plan exceeds income'; sub='Budgets + flows + debt payments are more than this month\'s income'; color='var(--rose)'; }
   return `<div class="plan" style="background:${bg}" onclick="go('settings')">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
