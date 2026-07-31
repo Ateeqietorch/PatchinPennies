@@ -353,6 +353,7 @@ const S = {
   moveForm:{ amount:'', dir:'in', dest:'', from:'', owner:'Both' },
   milestone:null,
   moneyTab:'overview',
+  payModal:null,
 };
 let _charts = {};
 
@@ -492,7 +493,7 @@ function render(){
   else if(S.view==='income') body=incomeHTML();
   else if(S.view==='recap') body=recapHTML();
   else body=homeHTML();
-  app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'');
+  app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'') + (S.payModal?payModalHTML():'');
   // post-render hooks
   if(S.view==='money' && S.moneyTab==='trends') requestAnimationFrame(drawCharts);
 }
@@ -1495,20 +1496,55 @@ function cardStripHTML(){
     </div>`;
   }).join('');
 }
-async function payCardPrompt(cardId,name,used){
+function payCardPrompt(cardId,name,used){
   if(used<=0){ showToast('🎉 Nothing owed on this card'); return; }
-  const v=prompt(`Pay off "${name}" — balance ${f0(used)}.\nHow much are you paying?`, used.toFixed(2));
-  if(v===null||isNaN(parseFloat(v))||parseFloat(v)<=0) return;
-  let fromId='';
-  const spend=S.accounts.filter(a=>a.Type==='checking'||a.Type==='savings'||a.Type==='hysa');
-  if(spend.length){
-    const list=spend.map((a,i)=>`${i+1} = ${a.Name}`).join('\n');
-    const pick=prompt(`Pay from which account? (blank = don't track source)\n${list}`,'1');
-    const idx=parseInt(pick)-1; if(!isNaN(idx)&&spend[idx]) fromId=spend[idx].ID;
-  }
-  const d=await api({action:'payCard',accountId:cardId,amount:v,fromAccountId:fromId});
+  const spend=S.accounts.filter(a=>a.Type!=='credit');
+  S.payModal={ cardId, name, used, amount:used.toFixed(2), fromId: spend[0]?spend[0].ID:'' };
+  render();
+}
+function payModalHTML(){
+  const m=S.payModal;
+  const spend=S.accounts.filter(a=>a.Type!=='credit');
+  const amt=parseFloat(m.amount)||0;
+  const after=Math.max(m.used-amt,0);
+  const opts=[`<option value="" ${!m.fromId?'selected':''}>Don't track a source</option>`]
+    .concat(spend.map(a=>`<option value="${a.ID}" ${m.fromId===a.ID?'selected':''}>${ACCT_ICONS[a.Type]||'🏦'} ${esc(a.Name)} · ${f0(a.Balance)}</option>`));
+  const quick=[['Full balance',m.used],['Half',m.used/2]];
+  return `<div class="modal-bg" onclick="if(event.target.classList.contains('modal-bg')){S.payModal=null;render()}">
+    <div class="modal">
+      <div class="modal-h">💳 Pay off ${esc(m.name)}</div>
+      <div class="modal-sub">Balance owed: <b>${f$(m.used)}</b></div>
+      <div class="fgroup"><label class="flabel">Payment amount</label>
+        <input class="finput big" type="text" inputmode="decimal" value="${m.amount}" oninput="S.payModal.amount=this.value;payModalSync()" id="payAmt">
+        <div style="display:flex;gap:8px;margin-top:8px">${quick.map(([l,v])=>`<button onclick="S.payModal.amount='${v.toFixed(2)}';render()" style="flex:1;border:1.5px solid var(--border);background:var(--card);border-radius:10px;padding:8px;font-family:var(--font);font-weight:800;font-size:11px;color:var(--txt2);cursor:pointer">${l}</button>`).join('')}</div>
+      </div>
+      <div class="fgroup"><label class="flabel">Pay from</label>
+        <select class="finput" onchange="S.payModal.fromId=this.value">${opts.join('')}</select>
+      </div>
+      <div style="background:var(--bg2);border-radius:12px;padding:11px 13px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;font-weight:700;color:var(--txt2)">Card balance after</span>
+        <span style="font-family:var(--mono);font-size:15px;font-weight:500;color:${after<=0?'var(--mint)':'var(--txt)'}">${f$(after)}${after<=0?' 🎉':''}</span>
+      </div>
+      <button class="btn-primary" id="payBtn" onclick="submitPayCard()">Pay ${f$(amt)}</button>
+      <button class="modal-cancel" onclick="S.payModal=null;render()">Cancel</button>
+    </div>
+  </div>`;
+}
+function payModalSync(){
+  // update only the "after" figure + button label without full re-render (keeps keyboard focus)
+  const m=S.payModal; if(!m)return;
+  const amt=parseFloat(m.amount)||0, after=Math.max(m.used-amt,0);
+  const btn=document.getElementById('payBtn'); if(btn) btn.textContent='Pay '+f$(amt);
+}
+async function submitPayCard(){
+  const m=S.payModal; if(!m)return;
+  const amt=parseFloat(m.amount);
+  if(!amt||isNaN(amt)||amt<=0){ showToast('⚠️ Enter an amount'); return; }
+  const btn=document.getElementById('payBtn'); if(btn)btn.disabled=true;
+  const d=await api({action:'payCard',accountId:m.cardId,amount:m.amount,fromAccountId:m.fromId||''});
+  S.payModal=null;
   if(d?.success){ showToast(`💳 Paid ${f0(d.paid)} · ${d.settled} charge${d.settled!==1?'s':''} now counted`); load(); }
-  else showToast('⚠️ '+(d?.error||'Failed'));
+  else { showToast('⚠️ '+(d?.error||'Failed')); render(); }
 }
 
 // ─── Move money (one-time savings/transfer) ──────────────────────────────────
