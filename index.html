@@ -40,6 +40,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .month-nav .mlabel{font-size:12px;font-weight:800;color:var(--txt);min-width:62px;text-align:center}
 .gear-btn{background:var(--card);border:1.5px solid var(--border);border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
 .gear-btn:active{background:var(--pink-soft)}
+.sync-badge{font-size:13px;line-height:1;cursor:default;display:inline-flex;align-items:center}
+.sync-badge.syncing{animation:spin 1.1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .addchooser{display:flex;gap:10px;margin-bottom:14px}
 .addchooser .seg-opt{flex:1;padding:12px 8px;border:1.5px solid var(--border);border-radius:13px;background:var(--card);font-size:13px}
 .addchooser .seg-opt.on{background:var(--pink);color:#fff;border-color:var(--pink)}
@@ -293,8 +296,8 @@ const LS = {
 const BOTH='both';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',investment:'📈 Investment / Roth IRA',credit:'💳 Credit card'};
-const ACCT_ICONS = {checking:'🏦',savings:'🌱',hysa:'🌱',investment:'📈',credit:'💳'};
+const ACCT_TYPES = {checking:'🏦 Checking',savings:'🌱 Savings',hysa:'🌱 High-yield savings',investment:'📈 Investment / Roth IRA',retirement:'🌅 Retirement / 401k',credit:'💳 Credit card'};
+const ACCT_ICONS = {checking:'🏦',savings:'🌱',hysa:'🌱',investment:'📈',retirement:'🌅',credit:'💳'};
 const FREQS = {weekly:'Weekly',biweekly:'Every 2 weeks',semimonthly:'Twice a month',monthly:'Monthly'};
 const FALLBACK_COLORS=['#93c5fd','#fdba74','#c4b5fd','#6ee7b7','#fde68a','#f0abfc','#a5f3fc','#fca5a5'];
 const CARD_LIMIT_DEFAULT = 1000;
@@ -360,6 +363,133 @@ function personName(id){ if(id===BOTH)return 'Both'; const p=personById(id); ret
 function personEmoji(id){ if(id===BOTH)return '👫'; const p=personById(id); return p?p.emoji:'🙂'; }
 function payerOptions(){ return [...D.people, {id:BOTH,name:'Both',emoji:'👫'}]; }
 function cardholderId(){ return D.people[0]?D.people[0].id:'ateeq'; } // sole cardholder per spec
+function fromServerPerson(name){ name=String(name||'').trim(); if(name==='Celeste') return 'celeste'; if(name==='Both') return BOTH; return 'ateeq'; }
+function toServerPerson(id){ if(id===BOTH) return 'Both'; const p=personById(id); return p?p.name:'Ateeq'; }
+function fromServerOwner(name){ name=String(name||'').trim(); if(name==='Celeste') return 'celeste'; if(name==='Ateeq') return 'ateeq'; return 'shared'; }
+function toServerOwner(id){ if(!id||id==='shared') return 'Both'; return toServerPerson(id); }
+
+// ─── Sync engine: Google Sheets is the source of truth; localStorage is the ───
+// ─── offline cache (last-loaded snapshot) + a queue of writes made while offline.
+const DEFAULT_SERVER_URL = 'https://script.google.com/macros/s/AKfycbxle4CS8BPQIjudoTNofO-L2Rx3zyucyZYCPJ16-bfKgU7g_dTSPqtcJjtozhpuWKf3dQ/exec';
+const SERVERURL_LS='pp:serverUrl', QUEUE_LS='pp:pendingWrites', DIDSETUP_LS='pp:didSetup';
+function getServerUrl(){ return localStorage.getItem(SERVERURL_LS)||DEFAULT_SERVER_URL; }
+function setServerUrl(v){ if(v&&v.trim())localStorage.setItem(SERVERURL_LS,v.trim()); else localStorage.removeItem(SERVERURL_LS); }
+
+function pendingQueue(){ try{ return JSON.parse(localStorage.getItem(QUEUE_LS)||'[]'); }catch(e){ return []; } }
+function savePendingQueue(q){ localStorage.setItem(QUEUE_LS, JSON.stringify(q)); }
+function queueWrite(action,params){ const q=pendingQueue(); q.push({qid:uuid(),action,params,ts:Date.now()}); savePendingQueue(q); }
+
+async function apiCall(action,params){
+  const url=getServerUrl();
+  const qp=Object.assign({action:action},params||{});
+  const clean={}; Object.keys(qp).forEach(k=>{ if(qp[k]!=null) clean[k]=String(qp[k]); });
+  const resp=await fetch(url+'?'+new URLSearchParams(clean));
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  const data=await resp.json();
+  if(data && data.error) throw new Error(data.error);
+  return data;
+}
+
+// Fire a write in the background: already-applied locally (client-generated id),
+// so success/failure never blocks the UI — failure just queues it for later.
+async function syncOp(action,params){
+  try{
+    const r=await apiCall(action,params);
+    setSyncStatus('online');
+    return r;
+  }catch(e){
+    setSyncStatus('offline');
+    queueWrite(action,params);
+    return null;
+  }
+}
+
+function setSyncStatus(s){ if(S.syncStatus!==s){ S.syncStatus=s; render(); } else S.syncStatus=s; }
+
+async function flushQueue(){
+  let q=pendingQueue();
+  if(!q.length) return true;
+  S.syncing=true; render();
+  while(q.length){
+    const item=q[0];
+    try{ await apiCall(item.action,item.params); }
+    catch(e){ setSyncStatus('offline'); S.syncing=false; render(); return false; }
+    q.shift(); savePendingQueue(q);
+  }
+  setSyncStatus('online');
+  S.syncing=false;
+  return true;
+}
+
+// ─── Server <-> client field mapping ───────────────────────────────────────────
+function fromServerTx(t){
+  return { id:t.ID, date:t.Date, desc:t.Description, category:t.Category, payer:fromServerPerson(t.PaidBy),
+    amount:+t.Amount||0, kind:'expense', need:(t.Need||'need').toLowerCase()==='want'?'want':'need',
+    sub:String(t.Sub||'').toLowerCase()==='yes', notes:t.Notes||'', txType:t.TxType==='Recurring'?'recurring':'one-time',
+    cardSettled: String(t.Notes||'').indexOf('CARD_SETTLED')>-1 };
+}
+function toServerTxParams(t){
+  return { id:t.id, date:t.date, description:t.desc, category:t.category, paidBy:toServerPerson(t.payer),
+    amount:t.amount, txType:t.txType==='recurring'?'Recurring':'One-time', notes:t.notes||'', need:t.need||'', sub:t.sub?'yes':'' };
+}
+function fromServerIncome(i){
+  return { id:i.ID, date:i.Date, desc:i.Description, category:'', payer:fromServerPerson(i.Source), amount:+i.Amount||0,
+    kind:'income', notes:i.Notes||'', txType:'one-time' };
+}
+function toServerIncomeParams(t){ return { id:t.id, date:t.date, description:t.desc, source:toServerPerson(t.payer), amount:t.amount, notes:t.notes||'' }; }
+function fromServerAcct(a){ return { id:a.ID, name:a.Name, owner:fromServerOwner(a.Owner), type:a.Type||'checking', balance:+a.Balance||0, apy:+a.APY||0, lastReconciled:a.LastReconciled||'', limit:+a.Limit||0 }; }
+function fromServerDebt(d){ return { id:d.ID, name:d.Name, owner:fromServerOwner(d.Owner), startBalance:+d.StartBalance||0, balance:+d.Balance||0, apr:+d.APR||0, minPayment:+d.MinPayment||0, highPriority:!!d.HighPriority, created:'' }; }
+function fromServerDebtPayment(p){ return { id:p.ID, debtId:p.DebtID, date:p.Date, amount:+p.Amount||0, payer:fromServerPerson(p.PaidBy), notes:'' }; }
+function fromServerGoal(g){ return { id:g.ID, name:g.Name, target:+g.Target||0, saved:+g.Saved||0, targetDate:g.TargetDate||'', notes:g.Notes||'', created:'' }; }
+function fromServerFlow(f){ return { id:f.ID, name:f.Name, kind:'transfer', category:'', amount:+f.Amount||0, payer:fromServerOwner(f.Owner),
+  frequency:f.Frequency||'monthly', dayOfMonth:f.DayOfMonth||1, destType:f.GoalID?'goal':'account', destId:f.GoalID||f.AccountID||'',
+  flowType:f.FlowType==='divest'?'divest':'invest', active:f.Active!==false, lastRun:f.LastRun||'' }; }
+function fromServerBill(b){ return { id:b.ID, name:b.Description, kind:'bill', category:b.Category, amount:+b.Amount||0, payer:fromServerPerson(b.PaidBy),
+  frequency:b.Frequency||'monthly', dayOfMonth:b.DayOfMonth||1, destType:'', destId:'', flowType:'', active:b.Active!==false, lastRun:b.LastRun||'' }; }
+function fromServerContrib(c){ return { id:c.ID, date:c.Date, flowType:c.FlowType==='divest'?'divest':'invest', amount:+c.Amount||0,
+  accountId:c.AccountID||'', goalId:c.GoalID||'', payer:fromServerOwner(c.Owner), notes:c.Notes||'', source:c.Source||'manual' }; }
+function fromServerCharge(c){ return { id:c.ID, accountId:c.AccountID, date:c.Date, desc:c.Description, category:c.Category, payer:fromServerPerson(c.PaidBy), amount:+c.Amount||0, settled:!!c.Settled, notes:'' }; }
+function fromServerCat(c){ return { id:c.ID, name:c.Name, icon:c.Icon||'📦', color:c.Color||'#f9a8d4', budget:+c.Budget||0 }; }
+
+function applyServerData(data){
+  D.transactions=[].concat((data.transactions||[]).map(fromServerTx), (data.income||[]).map(fromServerIncome));
+  D.accounts=(data.accounts||[]).map(fromServerAcct);
+  D.debts=(data.debts||[]).map(fromServerDebt);
+  D.debtPayments=(data.payments||[]).map(fromServerDebtPayment);
+  D.goals=(data.goals||[]).map(fromServerGoal);
+  D.recurring=[].concat((data.recurringBills||[]).map(fromServerBill), (data.flows||[]).map(fromServerFlow));
+  D.contributions=(data.contributions||[]).map(fromServerContrib);
+  D.cardCharges=(data.cardCharges||[]).map(fromServerCharge);
+  if(data.categories && data.categories.length) D.categories=data.categories.map(fromServerCat);
+  ['transactions','accounts','debts','debtPayments','goals','recurring','contributions','cardCharges','categories'].forEach(k=>commit(k));
+}
+
+// Loads the currently-selected month. If there's an unsynced queue we trust the
+// local cache (which already has those optimistic edits baked in) instead of
+// overwriting it with a fresh fetch — the queue drains first, then the next
+// load is safe to treat the server as canonical again.
+async function loadForMonth(){
+  S.syncStatus = navigator.onLine===false ? 'offline' : (S.syncStatus||'unknown');
+  render();
+  const q=pendingQueue();
+  if(q.length){
+    // try to drain first; only refetch once fully caught up
+    const drained=await flushQueue();
+    if(!drained){ render(); return; } // still offline/queued — keep showing cached D.*
+  }
+  if(!localStorage.getItem(DIDSETUP_LS)){
+    try{ await apiCall('runSetup',{}); localStorage.setItem(DIDSETUP_LS,'1'); }catch(e){ /* will retry next load */ }
+  }
+  try{
+    const data=await apiCall('getAll',{month:S.month,year:S.year});
+    applyServerData(data);
+    setSyncStatus('online');
+  }catch(e){
+    setSyncStatus('offline');
+    // fall back to whatever's cached in localStorage from the last successful load
+  }
+  render();
+}
 
 // ─── Account helpers ──────────────────────────────────────────────────────────
 function acctById(id){ return D.accounts.find(a=>a.id===id); }
@@ -386,6 +516,7 @@ const S = {
   moneyTab:'overview', person:'All',
   milestone:null,
   scan:{ status:'idle', error:'', imageDataUrl:'', imageB64:'', mediaType:'', rows:null, payer:BOTH },
+  syncStatus:'unknown', syncing:false,
 };
 
 // ─── Month filter ─────────────────────────────────────────────────────────────
@@ -442,36 +573,12 @@ function goalPct(g){ const saved=+g.saved||0, target=+g.target||0; return target
 function debtPctPaid(d){ return d.startBalance>0?Math.min(((d.startBalance-d.balance)/d.startBalance)*100,100):0; }
 function daysUntil(d){ if(!d)return null; const diff=Math.ceil((new Date(d)-new Date())/864e5); return diff>0?diff:null; }
 
-// ─── Recurring engine (weekly / biweekly / twice-monthly / monthly) ──────────
+// ─── Recurring math ────────────────────────────────────────────────────────────
+// Auto-logging recurring bills/flows now happens server-side (Apps Script daily
+// triggers) so it runs whether or not anyone has the app open, and never double-
+// logs across two people's devices. The client just displays what the server has run.
 function flowMonthly(amount,freq){
   switch(freq){ case 'weekly': return amount*52/12; case 'biweekly': return amount*26/12; case 'semimonthly': return amount*2; default: return amount; }
-}
-function daysBetween(a,b){ return Math.floor((b-a)/864e5); }
-function dueFrequency(freq,last,now){
-  if(!last) return true;
-  if(freq==='weekly') return daysBetween(last,now)>=7;
-  if(freq==='biweekly') return daysBetween(last,now)>=14;
-  if(freq==='semimonthly'){
-    const half=d=>d.getDate()<15?'a':'b';
-    return (now.getFullYear()+'-'+now.getMonth()+half(now)) !== (last.getFullYear()+'-'+last.getMonth()+half(last));
-  }
-  return now.getFullYear()!==last.getFullYear() || now.getMonth()!==last.getMonth();
-}
-function runDueRecurring(){
-  const now=new Date();
-  let changed=false;
-  D.recurring.filter(r=>r.active!==false).forEach(r=>{
-    const last=r.lastRun?new Date(r.lastRun+'T00:00:00'):null;
-    if(!dueFrequency(r.frequency,last,now)) return;
-    if(r.kind==='bill'){
-      addTransactionRaw({date:todayStr(),desc:r.name,category:r.category,payer:r.payer,amount:+r.amount,kind:'expense',need:r.need||'need',sub:!!r.sub,notes:'Auto-logged recurring bill',txType:'recurring',recurringId:r.id});
-    } else {
-      addContributionRaw({date:todayStr(),flowType:r.flowType||'invest',amount:+r.amount,accountId:r.destType==='account'?r.destId:'',goalId:r.destType==='goal'?r.destId:'',payer:r.payer,notes:'Auto-logged recurring: '+r.name,source:'auto'});
-    }
-    r.lastRun=todayStr();
-    changed=true;
-  });
-  if(changed) commit('recurring');
 }
 
 // ─── Transactions (expense / income / transfer) ───────────────────────────────
@@ -579,14 +686,22 @@ function render(){
   if(S.view==='money' && S.moneyTab==='trends') requestAnimationFrame(drawCharts);
 }
 function go(v){ S.view=v; window.scrollTo(0,0); render(); }
-function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.month=m;S.year=y; render(); }
+function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.month=m;S.year=y; render(); loadForMonth(); }
 function toggleBudgets(){ D.settings.budgetsOpen=!D.settings.budgetsOpen; commit('settings'); render(); }
 
+function syncBadgeHTML(){
+  const n=pendingQueue().length;
+  if(S.syncing) return `<span class="sync-badge syncing" title="Syncing…">🔄</span>`;
+  if(S.syncStatus==='offline') return `<span class="sync-badge offline" title="Offline — showing your last synced data${n?', '+n+' change'+(n!==1?'s':'')+' waiting to sync':''}">📴${n?' '+n:''}</span>`;
+  if(S.syncStatus==='online') return `<span class="sync-badge online" title="Synced with Google Sheets">🟢</span>`;
+  return '';
+}
 function topbarHTML(){
   const showMonth = ['home','money','recap','moneydate'].includes(S.view);
   return `<div class="topbar">
     <div class="wordmark">Patchin<em>Pennies</em></div>
     <div style="display:flex;align-items:center;gap:10px">
+      ${syncBadgeHTML()}
       ${showMonth?`<div class="month-nav">
         <button onclick="shiftMonth(-1)">‹</button>
         <span class="mlabel">${MONTHS_SHORT[S.month-1]} ${S.year}</span>
@@ -827,10 +942,12 @@ function submitTx(){
   if(!f.desc.trim()){ showToast('⚠️ Add a description'); return; }
   if(!f.cat){ showToast('⚠️ Add a category in Settings first'); return; }
   if(f.payWith && f.payWith!=='cash'){
-    chargeCard(f.payWith,{date:f.date,desc:f.desc,category:f.cat,payer:cardholderId(),amount:amt,notes:''});
+    const charge=chargeCard(f.payWith,{date:f.date,desc:f.desc,category:f.cat,payer:cardholderId(),amount:amt,notes:''});
+    syncOp('chargeCard',{id:charge.id,accountId:f.payWith,date:f.date,description:f.desc,category:f.cat,paidBy:toServerPerson(cardholderId()),amount:amt,notes:''});
     showToast('💳 Charged to card — queued until paid off');
   } else {
-    addTransactionRaw({date:f.date,desc:f.desc,category:f.cat,payer:f.payer,amount:amt,kind:'expense',need:f.need,sub:!!f.sub,notes:'',txType:'one-time'});
+    const tx=addTransactionRaw({date:f.date,desc:f.desc,category:f.cat,payer:f.payer,amount:amt,kind:'expense',need:f.need,sub:!!f.sub,notes:'',txType:'one-time'});
+    syncOp('addTransaction',toServerTxParams(tx));
     showToast('✅ Added!');
   }
   S.form={ desc:'',amount:'',cat:f.cat,payer:f.payer,date:todayStr(),notes:'',need:'need',sub:false,payWith:f.payWith };
@@ -840,7 +957,8 @@ function submitIncome(){
   const f=S.incomeForm;
   const amt=parseFloat(f.amount);
   if(!amt||isNaN(amt)||amt<=0){ showToast('⚠️ Enter an amount'); return; }
-  addTransactionRaw({date:f.date,desc:f.desc||'Income',category:'',payer:f.source,amount:amt,kind:'income',notes:'',txType:'one-time'});
+  const tx=addTransactionRaw({date:f.date,desc:f.desc||'Income',category:'',payer:f.source,amount:amt,kind:'income',notes:'',txType:'one-time'});
+  syncOp('addIncome',toServerIncomeParams(tx));
   showToast('✅ Income added!');
   S.incomeForm={desc:'',amount:'',source:f.source,date:todayStr()};
   go('home');
@@ -853,11 +971,12 @@ function submitMove(){
   if(f.from===f.to){ showToast('⚠️ Pick two different places'); return; }
   const fromAcct=f.from.startsWith('a:')?f.from.slice(2):'', fromGoal=f.from.startsWith('g:')?f.from.slice(2):'';
   const toAcct=f.to.startsWith('a:')?f.to.slice(2):'', toGoal=f.to.startsWith('g:')?f.to.slice(2):'';
-  if(fromAcct) addContributionRaw({date:todayStr(),flowType:'divest',amount:amt,accountId:fromAcct,goalId:'',payer:f.owner,notes:'Move money',source:'manual'});
-  if(fromGoal) addContributionRaw({date:todayStr(),flowType:'divest',amount:amt,accountId:'',goalId:fromGoal,payer:f.owner,notes:'Move money',source:'manual'});
-  if(toAcct) addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:toAcct,goalId:'',payer:f.owner,notes:'Move money',source:'manual'});
-  if(toGoal) addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:'',goalId:toGoal,payer:f.owner,notes:'Move money',source:'manual'});
-  addTransactionRaw({date:todayStr(),desc:'Move money',category:'',payer:f.owner,amount:amt,kind:'transfer',notes:'',txType:'one-time'});
+  const legs=[];
+  if(fromAcct) legs.push(addContributionRaw({date:todayStr(),flowType:'divest',amount:amt,accountId:fromAcct,goalId:'',payer:f.owner,notes:'Move money',source:'manual'}));
+  if(fromGoal) legs.push(addContributionRaw({date:todayStr(),flowType:'divest',amount:amt,accountId:'',goalId:fromGoal,payer:f.owner,notes:'Move money',source:'manual'}));
+  if(toAcct) legs.push(addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:toAcct,goalId:'',payer:f.owner,notes:'Move money',source:'manual'}));
+  if(toGoal) legs.push(addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:'',goalId:toGoal,payer:f.owner,notes:'Move money',source:'manual'}));
+  legs.forEach(c=>syncOp('addContribution',{id:c.id,date:c.date,flowType:c.flowType,amount:c.amount,accountId:c.accountId,goalId:c.goalId,owner:toServerOwner(c.payer),notes:c.notes}));
   showToast('🌱 Money moved!');
   S.moveForm={amount:'',from:'',to:'',owner:f.owner};
   go(D.goals.some(g=>('g:'+g.id)===f.to)?'goals':'money');
@@ -866,7 +985,7 @@ function settleConfirm(amount,aAhead){
   const settle=settleUp(); if(!settle.aId) return;
   const payer = aAhead?settle.bId:settle.aId;
   confirmModal(`Mark ${f$(amount)} as settled between ${personName(settle.aId)} and ${personName(settle.bId)}?`,'Settle up',
-    `addTransactionRaw({date:todayStr(),desc:'Settle up 💸',category:'${D.categories[0]?jsEsc(D.categories[0].name):''}',payer:'${payer}',amount:${amount},kind:'expense',need:'need',sub:false,notes:'Settle up between partners',txType:'one-time'});showToast('💸 Settled!');render();`);
+    `const _t=addTransactionRaw({date:todayStr(),desc:'Settle up 💸',category:'${D.categories[0]?jsEsc(D.categories[0].name):''}',payer:'${payer}',amount:${amount},kind:'expense',need:'need',sub:false,notes:'Settle up between partners',txType:'one-time'});syncOp('addTransaction',toServerTxParams(_t));showToast('💸 Settled!');render();`);
 }
 
 // ─── SCAN STATEMENT (bring-your-own Claude API key, client-side only) ────────
@@ -1046,7 +1165,8 @@ function importScanRows(){
   const rows=(S.scan.rows||[]).filter(r=>r.include && r.kind!=='skip');
   if(!rows.length){ showToast('⚠️ Nothing selected to import'); return; }
   rows.forEach(r=>{
-    addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:S.scan.payer,amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
+    const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:S.scan.payer,amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
+    syncOp(r.kind==='income'?'addIncome':'addTransaction', r.kind==='income'?toServerIncomeParams(tx):toServerTxParams(tx));
   });
   showToast(`✅ Imported ${rows.length} transaction${rows.length!==1?'s':''}`);
   resetScan();
@@ -1327,11 +1447,14 @@ function submitDebt(){
   if(!f.name.trim()||!bal||isNaN(bal)){ showToast('⚠️ Name + balance needed'); return; }
   if(S.debtEditId){
     const d=D.debts.find(x=>x.id===S.debtEditId);
-    if(d){ d.name=f.name; d.owner=f.owner; d.balance=bal; d.apr=parseFloat(f.apr)||0; d.minPayment=parseFloat(f.minPayment)||0; d.highPriority=!!f.highPriority; commit('debts'); }
+    if(d){ d.name=f.name; d.owner=f.owner; d.balance=bal; d.apr=parseFloat(f.apr)||0; d.minPayment=parseFloat(f.minPayment)||0; d.highPriority=!!f.highPriority; commit('debts');
+      syncOp('updateDebt',{id:d.id,name:d.name,owner:toServerOwner(d.owner),apr:d.apr,minPayment:d.minPayment,balance:d.balance,highPriority:d.highPriority?'yes':'no'}); }
     showToast('✏️ Debt updated');
   } else {
-    D.debts.push({id:uuid(),name:f.name,owner:f.owner,startBalance:bal,balance:bal,apr:parseFloat(f.apr)||0,minPayment:parseFloat(f.minPayment)||0,highPriority:!!f.highPriority,created:todayStr()});
+    const d={id:uuid(),name:f.name,owner:f.owner,startBalance:bal,balance:bal,apr:parseFloat(f.apr)||0,minPayment:parseFloat(f.minPayment)||0,highPriority:!!f.highPriority,created:todayStr()};
+    D.debts.push(d);
     commit('debts');
+    syncOp('addDebt',{id:d.id,name:d.name,owner:toServerOwner(d.owner),balance:d.balance,apr:d.apr,minPayment:d.minPayment,highPriority:d.highPriority?'yes':'no'});
     showToast('💳 Debt added');
   }
   S.debtFormOpen=false; S.debtEditId=null; S.debtForm={name:'',owner:'celeste',balance:'',apr:'',minPayment:'',highPriority:false};
@@ -1344,18 +1467,20 @@ function openDebtEdit(id){
 }
 function removeDebt(id){
   const d=D.debts.find(x=>x.id===id); if(!d)return;
-  confirmModal(`Delete "${esc(d.name)}" and its payment history?`,'Delete',`D.debts=D.debts.filter(x=>x.id!=='${id}');D.debtPayments=D.debtPayments.filter(x=>x.debtId!=='${id}');commit('debts');commit('debtPayments');showToast('🗑 Deleted');render();`);
+  confirmModal(`Delete "${esc(d.name)}" and its payment history?`,'Delete',`D.debts=D.debts.filter(x=>x.id!=='${id}');D.debtPayments=D.debtPayments.filter(x=>x.debtId!=='${id}');commit('debts');commit('debtPayments');syncOp('deleteDebt',{id:'${jsEsc(id)}'});showToast('🗑 Deleted');render();`);
 }
 function removeGoal(id){
   const g=D.goals.find(x=>x.id===id); if(!g)return;
-  confirmModal(`Delete "${esc(g.name)}"?`,'Delete',`D.goals=D.goals.filter(x=>x.id!=='${id}');commit('goals');showToast('🗑 Deleted');render();`);
+  confirmModal(`Delete "${esc(g.name)}"?`,'Delete',`D.goals=D.goals.filter(x=>x.id!=='${id}');commit('goals');syncOp('deleteGoal',{goalId:'${jsEsc(id)}'});showToast('🗑 Deleted');render();`);
 }
 function submitGoal(){
   const f=S.goalForm;
   const target=parseFloat(f.target);
   if(!f.name.trim()||!target||isNaN(target)){ showToast('⚠️ Name + target needed'); return; }
-  D.goals.push({id:uuid(),name:f.name,target,saved:parseFloat(f.saved)||0,targetDate:f.date||'',notes:'',created:todayStr()});
+  const g={id:uuid(),name:f.name,target,saved:parseFloat(f.saved)||0,targetDate:f.date||'',notes:'',created:todayStr()};
+  D.goals.push(g);
   commit('goals');
+  syncOp('addGoal',{id:g.id,name:g.name,target:g.target,saved:g.saved,targetDate:g.targetDate,notes:g.notes});
   showToast('🎯 Goal created!');
   S.goalForm={name:'',target:'',saved:'',date:''}; S.goalFormOpen=false;
   render();
@@ -1500,11 +1625,14 @@ function submitAccount(){
   if(!f.name.trim()){ showToast('⚠️ Name the account'); return; }
   if(S.acctEditId){
     const a=D.accounts.find(x=>x.id===S.acctEditId);
-    if(a){ a.name=f.name; a.owner=f.owner; a.type=f.type; a.balance=parseFloat(f.balance)||0; a.apy=parseFloat(f.apy)||0; a.limit=parseFloat(f.limit)||(f.type==='credit'?CARD_LIMIT_DEFAULT:0); commit('accounts'); }
+    if(a){ a.name=f.name; a.owner=f.owner; a.type=f.type; a.balance=parseFloat(f.balance)||0; a.apy=parseFloat(f.apy)||0; a.limit=parseFloat(f.limit)||(f.type==='credit'?CARD_LIMIT_DEFAULT:0); commit('accounts');
+      syncOp('updateAccount',{id:a.id,name:a.name,owner:toServerOwner(a.owner),type:a.type,apy:a.apy,balance:a.balance,limit:a.limit}); }
     showToast('✏️ Account updated');
   } else {
-    D.accounts.push({id:uuid(),name:f.name,owner:f.owner,type:f.type,balance:parseFloat(f.balance)||0,apy:parseFloat(f.apy)||0,limit:parseFloat(f.limit)||(f.type==='credit'?CARD_LIMIT_DEFAULT:0),lastReconciled:f.balance?todayStr():''});
+    const a={id:uuid(),name:f.name,owner:f.owner,type:f.type,balance:parseFloat(f.balance)||0,apy:parseFloat(f.apy)||0,limit:parseFloat(f.limit)||(f.type==='credit'?CARD_LIMIT_DEFAULT:0),lastReconciled:f.balance?todayStr():''};
+    D.accounts.push(a);
     commit('accounts');
+    syncOp('addAccount',{id:a.id,name:a.name,owner:toServerOwner(a.owner),type:a.type,balance:a.balance,apy:a.apy,limit:a.limit});
     showToast(f.type==='credit'?'💳 Card added':'🏦 Account added');
   }
   S.acctFormOpen=false; S.acctEditId=null; S.acctForm={name:'',owner:'shared',type:'checking',balance:'',apy:'',limit:''};
@@ -1513,7 +1641,7 @@ function submitAccount(){
 function removeAccount(id){
   const a=D.accounts.find(x=>x.id===id); if(!a)return;
   confirmModal(`Delete "${esc(a.name)}"? This won't delete past transactions.`,'Delete',
-    `D.accounts=D.accounts.filter(x=>x.id!=='${id}');D.cardCharges=D.cardCharges.filter(x=>x.accountId!=='${id}');commit('accounts');commit('cardCharges');S.acctFormOpen=false;S.acctEditId=null;showToast('🗑 Deleted');render();`);
+    `D.accounts=D.accounts.filter(x=>x.id!=='${id}');D.cardCharges=D.cardCharges.filter(x=>x.accountId!=='${id}');commit('accounts');commit('cardCharges');syncOp('deleteAccount',{id:'${jsEsc(id)}'});S.acctFormOpen=false;S.acctEditId=null;showToast('🗑 Deleted');render();`);
 }
 
 // ── Categories ──
@@ -1551,15 +1679,18 @@ function submitCategory(){
   const f=S.catForm;
   if(S.catEditId){
     const c=D.categories.find(x=>x.id===S.catEditId);
-    if(c){ c.icon=(f.icon||'📦').trim()||'📦'; c.budget=parseFloat(f.budget)||0; commit('categories'); }
+    if(c){ c.icon=(f.icon||'📦').trim()||'📦'; c.budget=parseFloat(f.budget)||0; commit('categories');
+      syncOp('updateCategory',{id:c.id,icon:c.icon,budget:c.budget}); }
     showToast('✏️ Category updated');
     S.catEditId=null;
   } else {
     const name=(f.name||'').trim();
     if(!name){ showToast('⚠️ Name the category'); return; }
     if(D.categories.some(c=>c.name.toLowerCase()===name.toLowerCase())){ showToast('⚠️ That category already exists'); return; }
-    D.categories.push({id:uuid(),name,icon:(f.icon||'').trim()||'📦',color:FALLBACK_COLORS[D.categories.length%FALLBACK_COLORS.length],budget:parseFloat(f.budget)||0});
+    const c={id:uuid(),name,icon:(f.icon||'').trim()||'📦',color:FALLBACK_COLORS[D.categories.length%FALLBACK_COLORS.length],budget:parseFloat(f.budget)||0};
+    D.categories.push(c);
     commit('categories');
+    syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:c.budget});
     showToast('🗂 '+name+' added');
   }
   S.catForm={name:'',icon:'',budget:''};
@@ -1568,7 +1699,7 @@ function submitCategory(){
 function removeCategory(id){
   const c=D.categories.find(x=>x.id===id); if(!c)return;
   confirmModal(`Remove "${esc(c.name)}"? Past transactions keep the name; it just leaves the picker.`,'Remove',
-    `D.categories=D.categories.filter(x=>x.id!=='${id}');commit('categories');if(S.catEditId==='${id}'){S.catEditId=null;S.catForm={name:'',icon:'',budget:''};}showToast('🗑 Removed');render();`);
+    `D.categories=D.categories.filter(x=>x.id!=='${id}');commit('categories');syncOp('deleteCategory',{id:'${jsEsc(id)}'});if(S.catEditId==='${id}'){S.catEditId=null;S.catForm={name:'',icon:'',budget:''};}showToast('🗑 Removed');render();`);
 }
 
 // ── Recurring ──
@@ -1619,8 +1750,18 @@ function openRecurEdit(id){
   S.recurForm={name:r.name,kind:r.kind,category:r.category||'',amount:String(r.amount),payer:r.payer,frequency:r.frequency,dayOfMonth:String(r.dayOfMonth||1),destType:r.destType||'account',destId:r.destId||'',flowType:r.flowType||'invest'};
   S.recurEditId=id; S.recurFormOpen=true; render();
 }
-function toggleRecurring(id){ const r=D.recurring.find(x=>x.id===id); if(!r)return; r.active=r.active===false?true:false; commit('recurring'); showToast(r.active?'▶️ Active':'⏸ Paused'); render(); }
-function removeRecurring(id){ confirmModal('Delete this recurring item?','Delete',`D.recurring=D.recurring.filter(x=>x.id!=='${id}');commit('recurring');showToast('🗑 Deleted');render();`); }
+function toggleRecurring(id){
+  const r=D.recurring.find(x=>x.id===id); if(!r)return;
+  r.active=r.active===false?true:false; commit('recurring');
+  const params={id:r.id,active:r.active?'yes':'no'};
+  syncOp(r.kind==='bill'?'updateRecurringBill':'updateFlow',params);
+  showToast(r.active?'▶️ Active':'⏸ Paused'); render();
+}
+function removeRecurring(id){
+  const r=D.recurring.find(x=>x.id===id); if(!r)return;
+  confirmModal('Delete this recurring item?','Delete',
+    `D.recurring=D.recurring.filter(x=>x.id!=='${id}');commit('recurring');syncOp('${r.kind==='bill'?'deleteRecurringBill':'deleteFlow'}',{id:'${jsEsc(id)}'});showToast('🗑 Deleted');render();`);
+}
 function submitRecurring(){
   const f=S.recurForm;
   const amt=parseFloat(f.amount);
@@ -1630,12 +1771,19 @@ function submitRecurring(){
   const payload={name:f.name,kind:f.kind,category:f.kind==='bill'?f.category:'',amount:amt,payer:f.payer,frequency:f.frequency,dayOfMonth:parseInt(f.dayOfMonth)||1,destType:f.destType,destId:f.kind==='transfer'?f.destId:'',flowType:f.kind==='transfer'?f.flowType:''};
   if(S.recurEditId){
     const r=D.recurring.find(x=>x.id===S.recurEditId);
-    if(r) Object.assign(r,payload);
-    commit('recurring');
+    if(r){
+      Object.assign(r,payload);
+      commit('recurring');
+      if(r.kind==='bill') syncOp('updateRecurringBill',{id:r.id,description:r.name,category:r.category,paidBy:toServerPerson(r.payer),amount:r.amount,frequency:r.frequency,day:r.dayOfMonth});
+      else syncOp('updateFlow',{id:r.id,name:r.name,flowType:r.flowType,amount:r.amount,owner:toServerOwner(r.payer),accountId:r.destType==='account'?r.destId:'',goalId:r.destType==='goal'?r.destId:'',day:r.dayOfMonth,frequency:r.frequency});
+    }
     showToast('✏️ Updated');
   } else {
-    D.recurring.push(Object.assign({id:uuid(),active:true,lastRun:'',created:todayStr()},payload));
+    const r=Object.assign({id:uuid(),active:true,lastRun:'',created:todayStr()},payload);
+    D.recurring.push(r);
     commit('recurring');
+    if(r.kind==='bill') syncOp('addRecurringBill',{id:r.id,description:r.name,category:r.category,paidBy:toServerPerson(r.payer),amount:r.amount,frequency:r.frequency,day:r.dayOfMonth});
+    else syncOp('addFlow',{id:r.id,name:r.name,flowType:r.flowType,amount:r.amount,owner:toServerOwner(r.payer),accountId:r.destType==='account'?r.destId:'',goalId:r.destType==='goal'?r.destId:'',day:r.dayOfMonth,frequency:r.frequency});
     showToast('🔁 Recurring item added');
   }
   S.recurFormOpen=false; S.recurEditId=null;
@@ -1647,37 +1795,49 @@ function settingsPeopleHTML(){
   const rows=D.people.map(p=>`<div class="setrow">
     <div class="acct-ico" style="background:var(--lav-soft)">${p.emoji}</div>
     ${S.peopleForm===p.id?`
-      <div class="setrow-body">
-        <input class="finput" type="text" value="${esc(p.name)}" oninput="updatePersonName('${p.id}',this.value)" style="margin-bottom:6px">
-        <input class="finput" type="text" maxlength="2" value="${esc(p.emoji)}" oninput="updatePersonEmoji('${p.id}',this.value)" style="width:70px">
-      </div>
+      <div class="setrow-body"><input class="finput" type="text" maxlength="2" value="${esc(p.emoji)}" oninput="updatePersonEmoji('${p.id}',this.value)" style="width:70px"></div>
       <button class="iconbtn" onclick="S.peopleForm=null;render()">✓</button>
     `:`
-      <div class="setrow-body" onclick="S.peopleForm='${p.id}';render()"><div class="setrow-name">${esc(p.name)}</div><div class="setrow-meta">tap to rename</div></div>
+      <div class="setrow-body"><div class="setrow-name">${esc(p.name)}</div><div class="setrow-meta">tap the icon to change their emoji</div></div>
       <button class="iconbtn" onclick="S.peopleForm='${p.id}';render()">✏️</button>
     `}
   </div>`).join('');
   return `<div class="card">
     <div class="card-title-row"><span class="card-title">👫 People</span></div>
-    <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">The two of you. Accounts, debts and expenses can be assigned per-person or shared.</div>
+    <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Names are fixed to match what's written in the "PaidBy"/"Owner" columns of the shared spreadsheet, so both of your devices always agree on who's who. Accounts, debts and expenses can be assigned per-person or shared.</div>
     ${rows}
   </div>`;
 }
-function updatePersonName(id,v){ const p=personById(id); if(p){ p.name=v; commit('people'); } }
 function updatePersonEmoji(id,v){ const p=personById(id); if(p){ p.emoji=v||'🙂'; commit('people'); } }
 
 // ── App ──
-function settingsAppHTML(){
+function settingsSyncHTML(){
+  const n=pendingQueue().length;
+  const statusLine = S.syncStatus==='online' ? '🟢 Synced with your Google Sheet' :
+    S.syncStatus==='offline' ? `📴 Offline — showing your last synced data${n?` · ${n} change${n!==1?'s':''} waiting to sync`:''}` :
+    'Checking connection…';
   return `<div class="card">
+    <div class="card-title-row"><span class="card-title">☁️ Sync</span></div>
+    <div style="font-size:12px;color:var(--txt2);font-weight:600;line-height:1.6;margin-bottom:10px">Everything lives in your Google Sheet — that's the source of truth both of you share. This browser keeps a local cache so the app still works with no signal; anything you do offline is queued and sent the moment you're back online.</div>
+    <div style="background:var(--bg2);border-radius:12px;padding:11px 13px;margin-bottom:10px;font-size:12.5px;font-weight:700">${statusLine}</div>
+    <button class="btn-ghost" onclick="loadForMonth()" style="margin-top:0">🔄 Sync now</button>
+    <div class="fgroup" style="margin-top:14px"><label class="flabel">Apps Script URL</label><input class="finput" type="text" placeholder="${esc(DEFAULT_SERVER_URL)}" value="${esc(localStorage.getItem(SERVERURL_LS)||'')}" oninput="setServerUrl(this.value)" style="font-size:12px"></div>
+    <div style="font-size:10.5px;color:var(--txt3);font-weight:600">Leave blank to use the default deployment. Only change this if you've deployed your own copy of the Apps Script backend.</div>
+  </div>`;
+}
+function settingsAppHTML(){
+  return `${settingsSyncHTML()}
+  ${settingsStatementScanHTML()}
+  <div class="card">
     <div class="card-title-row"><span class="card-title">⚙️ App</span></div>
-    <div style="font-size:12px;color:var(--txt2);font-weight:600;line-height:1.6;margin-bottom:10px">PatchinPennies stores everything locally in this browser — no account, no server. Clearing your browser data or switching devices will lose it, so export a backup now and then.</div>
-    <button class="btn-ghost" onclick="exportData()">⬇️ Export backup (JSON)</button>
-    <button class="btn-ghost" onclick="document.getElementById('importFile').click()">⬆️ Import backup</button>
+    <div style="font-size:12px;color:var(--txt2);font-weight:600;line-height:1.6;margin-bottom:10px">This local snapshot is a safety net on top of the Sheet — handy if you ever need to hand your data to a fresh device or roll back a mistake.</div>
+    <button class="btn-ghost" onclick="exportData()">⬇️ Export local snapshot (JSON)</button>
+    <button class="btn-ghost" onclick="document.getElementById('importFile').click()">⬆️ Import snapshot</button>
     <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importData(this)">
-    <button class="btn-danger" onclick="resetAllData()">🗑 Reset all data</button>
+    <button class="btn-danger" onclick="resetAllData()">🗑 Clear local cache</button>
+    <div style="font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:6px">Clearing the cache does not touch your Google Sheet — it just forces a fresh sync next load.</div>
     <div style="text-align:center;font-size:11px;color:var(--txt3);font-weight:700;margin-top:14px">PatchinPennies · for Ateeq, Celeste & Patches 🐱</div>
-  </div>
-  ${settingsStatementScanHTML()}`;
+  </div>`;
 }
 
 // ── Statement scan (bring-your-own Claude API key) ──
@@ -1723,8 +1883,9 @@ function importData(input){
   input.value='';
 }
 function resetAllData(){
-  confirmModal('Erase everything in PatchinPennies on this device? This cannot be undone — export a backup first if you want one.','Erase everything',
-    `Object.values(LS).forEach(k=>localStorage.removeItem(k));initData();S.view='home';showToast('🗑 All data cleared');render();`);
+  const n=pendingQueue().length;
+  confirmModal(n?`Clear the local cache? ${n} change${n!==1?'s':''} ${n!==1?'haven’t':'hasn’t'} synced yet and will be lost if you clear now — try Sync now first.`:'Clear the local cache and re-download everything fresh from your Google Sheet?','Clear cache',
+    `Object.values(LS).forEach(k=>localStorage.removeItem(k));localStorage.removeItem(QUEUE_LS);initData();S.view='home';showToast('🔄 Re-syncing…');render();loadForMonth();`);
 }
 
 // ─── Generic modal system (replaces prompt()/alert()/confirm()) ──────────────
@@ -1767,6 +1928,7 @@ function submitReconcile(){
   const prior=+a.balance||0;
   a.balance=v; a.lastReconciled=todayStr();
   commit('accounts');
+  syncOp('reconcileAccount',{id:a.id,balance:v});
   const drift=Math.round((v-prior)*100)/100;
   showToast(drift===0?'✓ Balance confirmed':`✓ Reconciled · drift ${drift>0?'+':''}${f0(drift)}`);
   closeModal();
@@ -1788,7 +1950,8 @@ function contributeModalInner(m){
 function submitContribute(){
   const m=S.modal; const amt=parseFloat(m.amount);
   if(!amt||isNaN(amt)||amt<=0){ showToast('⚠️ Enter an amount'); return; }
-  addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:m.accountId||'',goalId:m.goalId,payer:BOTH,notes:'Manual — '+m.name,source:'manual'});
+  const c=addContributionRaw({date:todayStr(),flowType:'invest',amount:amt,accountId:m.accountId||'',goalId:m.goalId,payer:BOTH,notes:'Manual — '+m.name,source:'manual'});
+  syncOp('addContribution',{id:c.id,date:c.date,flowType:c.flowType,amount:c.amount,accountId:c.accountId,goalId:c.goalId,owner:toServerOwner(c.payer),notes:c.notes});
   showToast('🌱 '+f0(amt)+' saved!');
   closeModal();
   checkMilestones();
@@ -1817,6 +1980,7 @@ function submitDebtPayment(){
   commit('debts');
   D.debtPayments.push({id:uuid(),debtId:m.debtId,date:todayStr(),amount:amt,payer:m.payer,notes:''});
   commit('debtPayments');
+  syncOp('logDebtPayment',{debtId:m.debtId,amount:amt,paidBy:toServerPerson(m.payer)});
   showToast(paidOff?'🎊 DEBT PAID OFF!':'💸 Payment logged');
   closeModal();
   checkMilestones();
@@ -1863,6 +2027,7 @@ function submitPayCard(){
   const m=S.modal; const amt=parseFloat(m.amount);
   if(!amt||isNaN(amt)||amt<=0){ showToast('⚠️ Enter an amount'); return; }
   const res=payCard(m.accountId,amt,m.fromId||'');
+  syncOp('payCard',{accountId:m.accountId,amount:amt,fromAccountId:m.fromId||''});
   closeModal();
   if(res && res.success) showToast(`💳 Paid ${f0(res.paid)} · ${res.settled} charge${res.settled!==1?'s':''} now counted`);
 }
@@ -1881,7 +2046,9 @@ function txDetailModalInner(m){
     <button class="modal-cancel" onclick="closeModal()">Close</button>`;
 }
 function deleteTx(id){
+  const t=D.transactions.find(x=>x.id===id);
   deleteTransactionById(id);
+  if(t) syncOp(t.kind==='income'?'deleteIncome':'deleteTransaction',{id});
   showToast('🗑 Deleted');
   closeModal();
 }
@@ -1929,11 +2096,10 @@ function confettiBurst(){
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 function init(){
-  initData();
-  runDueRecurring();
-  snapshotNetWorth();
-  checkMilestones();
+  initData(); // instant paint from the local cache (or empty state on a brand-new device)
   render();
+  loadForMonth().then(()=>{ snapshotNetWorth(); checkMilestones(); render(); });
+  window.addEventListener('online', ()=>loadForMonth());
 }
 init();
 </script>

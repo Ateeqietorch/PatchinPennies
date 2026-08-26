@@ -21,6 +21,7 @@ const DEBTPAY_SHEET = "DebtPayments";   // payment history per debt
 const FLOWS_SHEET   = "RecurringFlows"; // recurring investments / divestments
 const CARDCHG_SHEET = "CardCharges";    // queued credit-card charges (holding tank)
 const CONTRIB_SHEET = "Contributions";  // money moved into accounts/goals (or out)
+const CAT_SHEET     = "Categories";     // spending categories + monthly budgets (shared across devices)
 const DRIVE_FOLDER  = "PatchinPennies Receipts";
 
 // People to email the monthly recap to:
@@ -42,7 +43,9 @@ function getAll(month,year){
     payments: d.payments,
     flows: getFlows().flows,
     contributions: getContributions(month,year).contributions,
-    cardCharges: getCardCharges().charges
+    cardCharges: getCardCharges().charges,
+    recurringBills: getRecurringBills().bills,
+    categories: getCategories().categories
   };
 }
 
@@ -83,6 +86,17 @@ function doGet(e){
       case "updateFlow":         r=updateFlow(e.parameter); break;
       case "deleteFlow":         r=deleteFlow(e.parameter.id); break;
       case "runFlowsNow":        r=runFlows(new Date()); break;
+      // Recurring bills (rent, subscriptions, etc.)
+      case "getRecurringBills":    r=getRecurringBills(); break;
+      case "addRecurringBill":     r=addRecurringBill(e.parameter); break;
+      case "updateRecurringBill":  r=updateRecurringBill(e.parameter); break;
+      case "deleteRecurringBill":  r=deleteRecurringBill(e.parameter.id); break;
+      case "runRecurringBillsNow": r=runRecurringBills(new Date()); break;
+      // Categories & budgets (shared across devices)
+      case "getCategories":      r=getCategories(); break;
+      case "addCategory":        r=addCategory(e.parameter); break;
+      case "updateCategory":     r=updateCategory(e.parameter); break;
+      case "deleteCategory":     r=deleteCategory(e.parameter.id); break;
       // Contributions
       case "getContributions":   r=getContributions(e.parameter.month,e.parameter.year); break;
       case "addContribution":    r=addContribution(e.parameter); break;
@@ -91,6 +105,7 @@ function doGet(e){
       case "chargeCard":         r=chargeCard(e.parameter); break;
       case "payCard":            r=payCard(e.parameter); break;
       case "ping":               r={ok:true,version:4}; break;
+      case "runSetup":           r={result:setup()}; break; // safe to re-run; only adds missing sheets/columns
       default:                   r={error:"Unknown action: "+a};
     }
   }catch(err){ r={error:String(err)}; }
@@ -128,8 +143,8 @@ function setup(){
   let rc=book.getSheetByName(RECUR_SHEET);
   if(!rc){
     rc=book.insertSheet(RECUR_SHEET);
-    rc.appendRow(["Description","Category","PaidBy","Amount","Active"]);
-    rc.getRange(1,1,1,5).setFontWeight("bold");
+    rc.appendRow(["ID","Description","Category","PaidBy","Amount","Active","Frequency","DayOfMonth","LastRun"]);
+    rc.getRange(1,1,1,9).setFontWeight("bold");
     [["Rent","Fixed","Both",1800,"yes"],
      ["Internet","Utilities","Ateeq",95,"yes"],
      ["Spotify – Ateeq","Subscriptions","Ateeq",20,"yes"],
@@ -137,7 +152,22 @@ function setup(){
      ["Planned Parenthood","Donation","Celeste",10,"yes"],
      ["Patches Food Chewy","Patches' Expenses","Celeste",98.59,"yes"],
      ["Gym Membership","Health","Ateeq",20,"yes"],
-     ["CCC School Tuition","Personal/Misc","Celeste",111.87,"yes"]].forEach(r=>rc.appendRow(r));
+     ["CCC School Tuition","Personal/Misc","Celeste",111.87,"yes"]].forEach(r=>rc.appendRow([uuid(),r[0],r[1],r[2],r[3],r[4],"monthly",1,""]));
+  } else {
+    ensureCols(rc,["ID","Description","Category","PaidBy","Amount","Active","Frequency","DayOfMonth","LastRun"]);
+    backfillIds(rc);
+  }
+  // Categories & budgets (shared so both people see the same picker)
+  let cat=book.getSheetByName(CAT_SHEET);
+  if(!cat){
+    cat=book.insertSheet(CAT_SHEET);
+    cat.appendRow(["ID","Name","Icon","Color","Budget"]);
+    cat.getRange(1,1,1,5).setFontWeight("bold");
+    [["Groceries","🛒","#93c5fd",600],["Dining Out","🍽️","#fdba74",200],["Entertainment","🎮","#c4b5fd",150],
+     ["Transportation","🚗","#6ee7b7",100],["Utilities","💡","#fde68a",150],["Health","🏥","#fda4b8",100],
+     ["Shopping","🛍️","#f0abfc",150],["Personal/Misc","📦","#f9a8d4",100],["Patches' Expenses","🐱","#fbcfe8",75],
+     ["Fixed","🏠","#a5b4fc",0],["Subscriptions","📱","#e879f9",0],["Donation","❤️","#fca5a5",0]
+    ].forEach(r=>cat.appendRow([uuid(),r[0],r[1],r[2],r[3]]));
   }
   // Accounts
   let ac=book.getSheetByName(ACCT_SHEET);
@@ -195,6 +225,14 @@ function ensureCols(sh,need){
   need.forEach(h=>{ if(hdr.indexOf(h)===-1){ sh.getRange(1,sh.getLastColumn()+1).setValue(h); hdr.push(h); } });
 }
 function ensureGoalCols(gl){ ensureCols(gl,["ID","Name","Target","Saved","Type","TargetDate","Notes","Created"]); }
+// Assigns a UUID to any existing row whose ID cell is blank (safe/idempotent to re-run)
+function backfillIds(sh){
+  const data=sh.getDataRange().getValues(); if(data.length<2) return;
+  const idCol=data[0].map(String).indexOf("ID"); if(idCol===-1) return;
+  for(let i=1;i<data.length;i++){
+    if(!data[i][idCol]) sh.getRange(i+1,idCol+1).setValue(Utilities.getUuid());
+  }
+}
 
 function migrateDebtGoals(gl,db){
   const data=gl.getDataRange().getValues(); if(data.length<2) return;
@@ -213,10 +251,10 @@ function migrateDebtGoals(gl,db){
 // ─── Triggers (run once) ────────────────────────────────────────────────────
 function installTriggers(){
   ScriptApp.getProjectTriggers().forEach(t=>ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger("autoLogRecurring").timeBased().onMonthDay(1).atHour(6).create();
+  ScriptApp.newTrigger("autoLogRecurring").timeBased().everyDays(1).atHour(6).create();
   ScriptApp.newTrigger("autoLogFlows").timeBased().everyDays(1).atHour(6).create();
   ScriptApp.newTrigger("sendMonthlyRecap").timeBased().onMonthDay(1).atHour(7).create();
-  return "Triggers installed: recurring expenses (1st), daily flow check, recap email (1st).";
+  return "Triggers installed: daily recurring-bill check (weekly/biweekly/twice-monthly/monthly), daily flow check, recap email (1st).";
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -271,7 +309,7 @@ function getTransactions(month,year){
 }
 function addTransaction(p){
   const sh=sheet(TX_SHEET); ensureCols(sh,["ID","Date","Description","Category","PaidBy","Amount","TxType","Notes","ReceiptURL","Need","Sub"]);
-  const id=uuid();
+  const id=p.id||uuid();
   const hdr=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
   const row=hdr.map(h=>({ID:id,Date:p.date||todayStr(),Description:p.description||"",Category:p.category||"Personal/Misc",
     PaidBy:p.paidBy||"Ateeq",Amount:num(p.amount),TxType:p.txType||"One-time",Notes:p.notes||"",ReceiptURL:p.receiptUrl||"",
@@ -290,21 +328,71 @@ function updateTransaction(p){
 }
 function deleteTransaction(id){ return deleteRowById(sheet(TX_SHEET),id)?{success:true}:{error:"Not found"}; }
 
-// ─── Recurring expenses ─────────────────────────────────────────────────────
-function seedFixed(month,year){
-  const rc=sheet(RECUR_SHEET); const tx=sheet(TX_SHEET);
-  const m=+month||(new Date().getMonth()+1), y=+year||(new Date().getFullYear());
-  const dateStr=Utilities.formatDate(new Date(y,m-1,1),tz(),"yyyy-MM-dd");
-  const existing=rowsAsObjects(tx).some(t=>monthMatch(t.Date,m,y)&&String(t.Notes||"").indexOf("AUTO_SEED")>-1);
-  if(existing) return {success:true, note:"already seeded"};
-  const items=rowsAsObjects(rc).filter(r=>String(r.Active||"yes").toLowerCase()!=="no");
-  items.forEach(r=>{
-    addTransaction({date:dateStr,description:r.Description,category:r.Category,paidBy:r.PaidBy,amount:r.Amount,txType:"Recurring",notes:"AUTO_SEED",
-      sub:String(r.Category||"").toLowerCase()==="subscriptions"?"yes":"",need:""});
-  });
-  return {success:true, count:items.length};
+// ─── Recurring bills (rent, subscriptions, etc. — auto-logged as expenses) ───
+function getRecurringBills(){
+  const out=rowsAsObjects(sheet(RECUR_SHEET)).map(r=>({
+    ID:r.ID, Description:r.Description, Category:r.Category, PaidBy:r.PaidBy||"Ateeq", Amount:num(r.Amount),
+    Active:String(r.Active||"yes").toLowerCase()!=="no",
+    Frequency:(r.Frequency||"monthly"), DayOfMonth:Math.min(Math.max(parseInt(r.DayOfMonth)||1,1),28),
+    LastRun:r.LastRun?fmtDate(r.LastRun):""
+  }));
+  return {bills:out};
 }
-function autoLogRecurring(){ const now=new Date(); seedFixed(now.getMonth()+1, now.getFullYear()); }
+function addRecurringBill(p){
+  const sh=sheet(RECUR_SHEET); const id=p.id||uuid();
+  const freq=["weekly","biweekly","semimonthly","monthly"].indexOf(p.frequency)>-1?p.frequency:"monthly";
+  sh.appendRow([id,p.description||"Bill",p.category||"Personal/Misc",p.paidBy||"Ateeq",num(p.amount),"yes",freq,Math.min(Math.max(parseInt(p.day)||1,1),28),""]);
+  return {success:true,id};
+}
+function updateRecurringBill(p){
+  const found=updateRowById(sheet(RECUR_SHEET),p.id,Object.assign({},
+    p.description?{Description:p.description}:{}, p.category?{Category:p.category}:{}, p.paidBy?{PaidBy:p.paidBy}:{},
+    p.amount!=null?{Amount:num(p.amount)}:{}, p.frequency?{Frequency:p.frequency}:{},
+    p.day!=null?{DayOfMonth:Math.min(Math.max(parseInt(p.day)||1,1),28)}:{},
+    p.active!=null?{Active:p.active==="no"?"no":"yes"}:{}));
+  return found?{success:true}:{error:"Not found"};
+}
+function deleteRecurringBill(id){ return deleteRowById(sheet(RECUR_SHEET),id)?{success:true}:{error:"Not found"}; }
+// Runs any active bill that's due since its LastRun, given its own frequency (mirrors runFlows()).
+function runRecurringBills(now){
+  const sh=sheet(RECUR_SHEET);
+  const bills=getRecurringBills().bills.filter(b=>b.Active);
+  let ran=0;
+  bills.forEach(b=>{
+    const last=b.LastRun?new Date(b.LastRun):null;
+    let due=false;
+    if(b.Frequency==="weekly")        due=!last||daysBetween(last,now)>=7;
+    else if(b.Frequency==="biweekly") due=!last||daysBetween(last,now)>=14;
+    else if(b.Frequency==="semimonthly"){ const d=now.getDate(); const key=now.getFullYear()+"-"+(now.getMonth()+1); const lastKey=last?last.getFullYear()+"-"+(last.getMonth()+1):""; const half=d>=1&&d<15?"a":"b"; const lastHalf=last?(last.getDate()<15?"a":"b"):""; due=!last||(key+half)!==(lastKey+lastHalf); }
+    else { due=!last||now.getMonth()!==last.getMonth()||now.getFullYear()!==last.getFullYear(); if(due&&now.getDate()<b.DayOfMonth&&(!last||now.getMonth()===last.getMonth())) due=false; }
+    if(!due) return;
+    addTransaction({date:todayStr(),description:b.Description,category:b.Category,paidBy:b.PaidBy,amount:b.Amount,txType:"Recurring",notes:"AUTO_SEED",
+      sub:String(b.Category||"").toLowerCase()==="subscriptions"?"yes":"",need:""});
+    updateRowById(sh,b.ID,{LastRun:todayStr()});
+    ran++;
+  });
+  return {success:true, ran:ran};
+}
+function autoLogRecurring(){ runRecurringBills(new Date()); }
+
+// ─── Categories & budgets (shared across devices) ────────────────────────────
+function getCategories(){
+  const out=rowsAsObjects(sheet(CAT_SHEET)).map(c=>({
+    ID:c.ID, Name:c.Name, Icon:c.Icon||"📦", Color:c.Color||"#f9a8d4", Budget:num(c.Budget)
+  }));
+  return {categories:out};
+}
+function addCategory(p){
+  const sh=sheet(CAT_SHEET); const id=p.id||uuid();
+  sh.appendRow([id,p.name||"Category",p.icon||"📦",p.color||"#f9a8d4",num(p.budget||0)]);
+  return {success:true,id};
+}
+function updateCategory(p){
+  const found=updateRowById(sheet(CAT_SHEET),p.id,Object.assign({},
+    p.icon?{Icon:p.icon}:{}, p.budget!=null?{Budget:num(p.budget)}:{}));
+  return found?{success:true}:{error:"Not found"};
+}
+function deleteCategory(id){ return deleteRowById(sheet(CAT_SHEET),id)?{success:true}:{error:"Not found"}; }
 
 // ─── Income ─────────────────────────────────────────────────────────────────
 function getIncome(month,year){
@@ -315,7 +403,7 @@ function getIncome(month,year){
   return {income:out};
 }
 function addIncome(p){
-  const sh=sheet(INCOME_SHEET); const id=uuid();
+  const sh=sheet(INCOME_SHEET); const id=p.id||uuid();
   sh.appendRow([id,p.date||todayStr(),p.description||"Income",p.source||"Ateeq",num(p.amount),p.notes||""]);
   return {success:true,id};
 }
@@ -331,7 +419,7 @@ function getGoals(){
   return {goals:out};
 }
 function addGoal(p){
-  const sh=sheet(GOALS_SHEET); const id=uuid();
+  const sh=sheet(GOALS_SHEET); const id=p.id||uuid();
   sh.appendRow([id,p.name||"Goal",num(p.target),num(p.saved||0),p.type||"savings",p.targetDate||"",p.notes||"",todayStr()]);
   return {success:true,id};
 }
@@ -352,7 +440,7 @@ function getAccounts(){
   return {accounts:out};
 }
 function addAccount(p){
-  const sh=sheet(ACCT_SHEET); const id=uuid();
+  const sh=sheet(ACCT_SHEET); const id=p.id||uuid();
   sh.appendRow([id,p.name||"Account",p.owner||"Both",p.type||"checking",num(p.balance||0),num(p.apy||0),p.balance?todayStr():"",todayStr(),num(p.limit||0)]);
   return {success:true,id};
 }
@@ -387,7 +475,7 @@ function getDebts(){
   return {debts:debts, payments:payments};
 }
 function addDebt(p){
-  const sh=sheet(DEBT_SHEET); const id=uuid();
+  const sh=sheet(DEBT_SHEET); const id=p.id||uuid();
   const bal=num(p.balance);
   sh.appendRow([id,p.name||"Debt",p.owner||"Both",bal,bal,num(p.apr||0),num(p.minPayment||0),p.highPriority==="yes"?"yes":"no",todayStr()]);
   return {success:true,id};
@@ -413,7 +501,7 @@ function logDebtPayment(p){
   const amt=num(p.amount);
   const newBal=Math.max(cur-amt,0);
   updateRowById(sh,p.debtId,{Balance:newBal});
-  sheet(DEBTPAY_SHEET).appendRow([uuid(),p.debtId,p.date||todayStr(),amt,p.paidBy||"Both",p.notes||""]);
+  sheet(DEBTPAY_SHEET).appendRow([p.id||uuid(),p.debtId,p.date||todayStr(),amt,p.paidBy||"Both",p.notes||""]);
   return {success:true, balance:newBal, paidOff:newBal===0};
 }
 
@@ -429,7 +517,7 @@ function getFlows(){
   return {flows:out};
 }
 function addFlow(p){
-  const sh=sheet(FLOWS_SHEET); const id=uuid();
+  const sh=sheet(FLOWS_SHEET); const id=p.id||uuid();
   const freq=["weekly","biweekly","semimonthly","monthly"].indexOf(p.frequency)>-1?p.frequency:"monthly";
   sh.appendRow([id,p.name||"Flow",p.flowType==="divest"?"divest":"invest",num(p.amount),
     p.owner||"Both",p.accountId||"",p.goalId||"",Math.min(Math.max(parseInt(p.day)||1,1),28),"yes",todayStr(),freq,""]);
@@ -498,7 +586,7 @@ function chargeCard(p){
   const amt=num(p.amount);
   const cur=num(getCell(sh,cardId,"Balance"));
   updateRowById(sh,cardId,{Balance:cur+amt});
-  sheet(CARDCHG_SHEET).appendRow([uuid(),cardId,p.date||todayStr(),p.description||"",p.category||"Personal/Misc",p.paidBy||"Ateeq",amt,"no",p.notes||""]);
+  sheet(CARDCHG_SHEET).appendRow([p.id||uuid(),cardId,p.date||todayStr(),p.description||"",p.category||"Personal/Misc",p.paidBy||"Ateeq",amt,"no",p.notes||""]);
   const lim=num(getCell(sh,cardId,"Limit"));
   return {success:true, balance:cur+amt, limit:lim};
 }
@@ -567,7 +655,7 @@ function addContribution(p){
     const cur=num(getCell(gs,p.goalId,"Saved"));
     if(getCell(gs,p.goalId,"ID")!==null) updateRowById(gs,p.goalId,{Saved:Math.max(cur-amt,0)});
   }
-  sheet(CONTRIB_SHEET).appendRow([uuid(),p.date||todayStr(),type,amt,p.accountId||"",p.goalId||"",p.owner||"Both",p.notes||"",p.source||"manual"]);
+  sheet(CONTRIB_SHEET).appendRow([p.id||uuid(),p.date||todayStr(),type,amt,p.accountId||"",p.goalId||"",p.owner||"Both",p.notes||"",p.source||"manual"]);
   return {success:true};
 }
 
