@@ -385,6 +385,7 @@ const S = {
   peopleForm:null,
   moneyTab:'overview', person:'All',
   milestone:null,
+  scan:{ status:'idle', error:'', imageDataUrl:'', imageB64:'', mediaType:'', rows:null, payer:BOTH },
 };
 
 // ─── Month filter ─────────────────────────────────────────────────────────────
@@ -746,10 +747,11 @@ function setMoveForm(k,v){ S.moveForm[k]=v; render(); }
 
 function addHTML(){
   const chooser=`<div class="addchooser">
-    ${[['expense','🧾 Expense'],['income','💰 Income'],['move','🌱 Move money']].map(([m,l])=>`<div class="seg-opt ${S.addMode===m?'on':''}" onclick="setAddMode('${m}')">${l}</div>`).join('')}
+    ${[['expense','🧾 Expense'],['income','💰 Income'],['move','🌱 Move money'],['scan','📷 Scan statement']].map(([m,l])=>`<div class="seg-opt ${S.addMode===m?'on':''}" onclick="setAddMode('${m}')">${l}</div>`).join('')}
   </div>`;
   if(S.addMode==='income') return chooser+incomeFormHTML();
   if(S.addMode==='move') return chooser+moveFormHTML();
+  if(S.addMode==='scan') return chooser+scanHTML();
   return chooser+expenseFormHTML();
 }
 
@@ -865,6 +867,190 @@ function settleConfirm(amount,aAhead){
   const payer = aAhead?settle.bId:settle.aId;
   confirmModal(`Mark ${f$(amount)} as settled between ${personName(settle.aId)} and ${personName(settle.bId)}?`,'Settle up',
     `addTransactionRaw({date:todayStr(),desc:'Settle up 💸',category:'${D.categories[0]?jsEsc(D.categories[0].name):''}',payer:'${payer}',amount:${amount},kind:'expense',need:'need',sub:false,notes:'Settle up between partners',txType:'one-time'});showToast('💸 Settled!');render();`);
+}
+
+// ─── SCAN STATEMENT (bring-your-own Claude API key, client-side only) ────────
+function resetScan(){ S.scan={status:'idle',error:'',imageDataUrl:'',imageB64:'',mediaType:'',rows:null,payer:S.scan.payer||BOTH}; }
+function cancelScan(){ resetScan(); render(); }
+
+function handleStatementFile(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const maxDim=1800;
+      let w=img.width,h=img.height;
+      if(w>maxDim||h>maxDim){ const scale=maxDim/Math.max(w,h); w=Math.round(w*scale); h=Math.round(h*scale); }
+      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      S.scan.imageDataUrl=canvas.toDataURL('image/jpeg',0.9);
+      S.scan.imageB64=S.scan.imageDataUrl.split(',')[1];
+      S.scan.mediaType='image/jpeg';
+      S.scan.status='ready'; S.scan.error='';
+      render();
+    };
+    img.onerror=()=>showToast('⚠️ Could not read that image');
+    img.src=reader.result;
+  };
+  reader.onerror=()=>showToast('⚠️ Could not read that file');
+  reader.readAsDataURL(file);
+}
+
+function findLikelyDuplicate(parsed){
+  const kind=parsed.kind==='income'?'income':'expense';
+  const amt=Math.abs(+parsed.amount||0);
+  const pd=new Date(parsed.date+'T00:00:00'); if(isNaN(pd)) return null;
+  return D.transactions.find(t=>{
+    if(t.kind!==kind) return false;
+    if(Math.abs(t.amount-amt)>0.01) return false;
+    const td=new Date(t.date+'T00:00:00'); if(isNaN(td)) return false;
+    return Math.abs(td-pd)<=864e5;
+  });
+}
+
+async function runStatementScan(){
+  const key=getApiKey();
+  if(!key){ S.scan.status='error'; S.scan.error='Add your Anthropic API key in Settings → App first.'; render(); return; }
+  if(!S.scan.imageB64){ showToast('⚠️ Choose a photo first'); return; }
+  S.scan.status='scanning'; S.scan.error=''; render();
+  const categoryNames=D.categories.map(c=>c.name);
+  const schema={
+    type:'object',
+    properties:{ transactions:{ type:'array', items:{ type:'object', properties:{
+      date:{type:'string'}, description:{type:'string'}, amount:{type:'number'},
+      kind:{type:'string',enum:['expense','income','skip']}, category:{type:'string'}
+    }, required:['date','description','amount','kind','category'], additionalProperties:false } } },
+    required:['transactions'], additionalProperties:false
+  };
+  const prompt=`You are reading a photo of a bank or credit card statement. Extract every line-item transaction you can see.
+
+Today's date is ${todayStr()}. If a printed date has no year, infer it from the statement's own dates or from today's date — never invent a future date unless the statement is clearly future-dated.
+
+For each transaction output:
+- date: YYYY-MM-DD
+- description: the merchant/payee as printed (clean up obvious OCR noise but keep it recognizable)
+- amount: a positive number, no currency symbol
+- kind: "expense" for a purchase/charge/debit, "income" for a deposit/refund/credit paid TO the account holder, or "skip" for anything that isn't a real transaction to log (statement balance lines, minimum-payment lines, the card's own autopay/payment line, running totals, headers/footers)
+- category: pick the single closest match from this exact list (copy the text exactly): ${JSON.stringify(categoryNames)} — if nothing fits well, use ""
+
+Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.`;
+  try{
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({
+        model:getScanModel(),
+        max_tokens:8000,
+        output_config:{format:{type:'json_schema',schema}},
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:S.scan.mediaType,data:S.scan.imageB64}},
+          {type:'text',text:prompt}
+        ]}]
+      })
+    });
+    const data=await resp.json();
+    if(!resp.ok) throw new Error((data&&data.error&&data.error.message)||('HTTP '+resp.status));
+    if(data.stop_reason==='refusal') throw new Error('Claude declined to read this image'+(data.stop_details&&data.stop_details.explanation?': '+data.stop_details.explanation:'.'));
+    const textBlock=(data.content||[]).find(b=>b.type==='text');
+    if(!textBlock) throw new Error('No response content');
+    const parsed=JSON.parse(textBlock.text);
+    const txns=(parsed.transactions||[]).filter(t=>t&&t.date&&t.kind);
+    if(!txns.length) throw new Error('Could not find any transactions in that image');
+    S.scan.rows=txns.map((t,i)=>{
+      const dup=t.kind!=='skip'?findLikelyDuplicate(t):null;
+      const kind=t.kind==='income'?'income':t.kind==='skip'?'skip':'expense';
+      return { id:i, date:t.date, desc:t.description||'', amount:Math.abs(+t.amount||0), kind,
+        category:categoryNames.includes(t.category)?t.category:(categoryNames[0]||''),
+        include: kind!=='skip' && !dup, duplicate:!!dup };
+    });
+    S.scan.status='results';
+  }catch(e){
+    S.scan.error=e.message||'Something went wrong reading that image';
+    S.scan.status='error';
+  }
+  render();
+}
+
+function toggleScanRow(id){ const r=S.scan.rows.find(x=>x.id===id); if(!r)return; r.include=!r.include; render(); }
+function setScanRowField(id,key,val){
+  const r=S.scan.rows.find(x=>x.id===id); if(!r)return;
+  if(key==='amount') r.amount=Math.abs(parseFloat(val))||0;
+  else r[key]=val;
+  if(key==='kind') r.include = (val!=='skip');
+  render();
+}
+function setScanPayer(p){ S.scan.payer=p; render(); }
+
+function scanHTML(){
+  const key=getApiKey();
+  if(!key){
+    return `<div class="card">
+      <div class="empty"><div class="empty-ico">🔑</div><div class="empty-h">Add an API key first</div><div class="empty-s">Settings → App → Statement scanning — bring your own Claude API key to enable this.</div></div>
+      <button class="btn-ghost" onclick="goSettings('app')">Open Settings</button>
+    </div>`;
+  }
+  const s=S.scan;
+  if(s.status==='scanning') return `<div class="card"><div class="loading" style="min-height:auto;padding:30px 0"><div class="loading-cat">🐱</div><div style="font-weight:800;color:var(--txt2)">Reading your statement…</div></div></div>`;
+  if(s.status==='results' && s.rows) return scanResultsHTML();
+  return `<div class="card">
+    ${s.status==='error'?`<div class="settle" style="background:var(--rose-soft);border-color:var(--rose)"><div class="settle-msg" style="color:var(--rose)">⚠️ ${esc(s.error)}</div></div>`:''}
+    <div style="font-size:12px;color:var(--txt2);font-weight:600;margin-bottom:12px">Upload a photo of a bank or credit card statement. Claude reads each line, and anything that looks already logged gets flagged so you don't double-count it.</div>
+    ${s.imageDataUrl?`<img src="${s.imageDataUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;display:block">`:''}
+    <button class="receipt-btn" onclick="document.getElementById('statementInput').click()">${s.imageDataUrl?'📷 Choose a different photo':'📷 Choose a photo'}</button>
+    <input type="file" id="statementInput" accept="image/*" capture="environment" style="display:none" onchange="handleStatementFile(this)">
+    <button class="btn-primary" style="margin-top:10px" onclick="runStatementScan()" ${s.imageDataUrl?'':'disabled'}>Scan statement</button>
+  </div>`;
+}
+function scanResultsHTML(){
+  const rows=S.scan.rows;
+  const skipped=rows.filter(r=>r.kind==='skip').length;
+  const included=rows.filter(r=>r.include).length;
+  const dupCount=rows.filter(r=>r.duplicate).length;
+  const ownerSeg=payerOptions().map(p=>`<div class="seg-opt ${S.scan.payer===p.id?'on':''}" onclick="setScanPayer('${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
+  const rowHTML=r=>`<div class="tx" style="cursor:default;align-items:flex-start;opacity:${r.kind==='skip'?'.55':'1'}">
+    <div class="cpill ${r.include?'on':''}" style="padding:0;width:26px;height:26px;justify-content:center;flex-shrink:0;margin-top:2px" onclick="toggleScanRow(${r.id})">${r.include?'✓':''}</div>
+    <div class="tx-body">
+      <div style="display:flex;gap:6px;margin-bottom:4px">
+        <input class="finput" type="date" value="${r.date}" onchange="setScanRowField(${r.id},'date',this.value)" style="padding:6px 8px;font-size:12px;flex:0 0 132px">
+        <input class="finput" type="text" value="${esc(r.desc)}" onchange="setScanRowField(${r.id},'desc',this.value)" style="padding:6px 8px;font-size:12px;flex:1">
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="finput" type="text" inputmode="decimal" value="${r.amount}" onchange="setScanRowField(${r.id},'amount',this.value)" style="padding:6px 8px;font-size:12px;width:76px;font-family:var(--mono)">
+        <select class="finput" onchange="setScanRowField(${r.id},'category',this.value)" style="padding:6px 8px;font-size:11px;flex:1" ${r.kind==='income'?'disabled':''}>
+          ${D.categories.map(c=>`<option value="${jsEsc(c.name)}" ${r.category===c.name?'selected':''}>${c.icon} ${esc(c.name)}</option>`).join('')}
+        </select>
+        <select class="finput" onchange="setScanRowField(${r.id},'kind',this.value)" style="padding:6px 8px;font-size:11px;flex:0 0 88px">
+          <option value="expense" ${r.kind==='expense'?'selected':''}>Expense</option>
+          <option value="income" ${r.kind==='income'?'selected':''}>Income</option>
+          <option value="skip" ${r.kind==='skip'?'selected':''}>Skip</option>
+        </select>
+      </div>
+      ${r.duplicate?`<div style="font-size:10.5px;color:var(--peach);font-weight:700;margin-top:3px">⚠️ Looks already logged — unchecked by default</div>`:''}
+    </div>
+  </div>`;
+  return `<div class="card">
+    <div class="card-title-row"><span class="card-title">🧾 Found ${rows.length} line${rows.length!==1?'s':''}</span><button class="card-toggle" onclick="cancelScan()">Start over</button></div>
+    <div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-bottom:10px">${included} selected to import · ${dupCount} look already logged · ${skipped} non-transaction line${skipped!==1?'s':''} de-emphasized. Uncheck, edit, or fix anything before importing.</div>
+    <div class="fgroup"><label class="flabel">Whose statement is this?</label><div class="seg">${ownerSeg}</div></div>
+    ${rows.map(rowHTML).join('')}
+    <button class="btn-primary" style="margin-top:6px" onclick="importScanRows()">Import ${included} transaction${included!==1?'s':''}</button>
+  </div>`;
+}
+function importScanRows(){
+  const rows=(S.scan.rows||[]).filter(r=>r.include && r.kind!=='skip');
+  if(!rows.length){ showToast('⚠️ Nothing selected to import'); return; }
+  rows.forEach(r=>{
+    addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:S.scan.payer,amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
+  });
+  showToast(`✅ Imported ${rows.length} transaction${rows.length!==1?'s':''}`);
+  resetScan();
+  go('home');
 }
 
 // ─── MONEY ────────────────────────────────────────────────────────────────────
@@ -1490,8 +1676,30 @@ function settingsAppHTML(){
     <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importData(this)">
     <button class="btn-danger" onclick="resetAllData()">🗑 Reset all data</button>
     <div style="text-align:center;font-size:11px;color:var(--txt3);font-weight:700;margin-top:14px">PatchinPennies · for Ateeq, Celeste & Patches 🐱</div>
+  </div>
+  ${settingsStatementScanHTML()}`;
+}
+
+// ── Statement scan (bring-your-own Claude API key) ──
+// Stored OUTSIDE the pp:* export map on purpose: exportData()/importData() only
+// ever touch Object.keys(LS), so this key can never end up in a shared backup file.
+const APIKEY_LS='pp:anthropicApiKey', MODEL_LS='pp:anthropicModel';
+const SCAN_MODELS={'claude-opus-5':'Opus 5 (most accurate, default)','claude-sonnet-5':'Sonnet 5 (faster, cheaper)','claude-haiku-4-5-20251001':'Haiku 4.5 (fastest, cheapest)'};
+function getApiKey(){ return localStorage.getItem(APIKEY_LS)||''; }
+function getScanModel(){ return localStorage.getItem(MODEL_LS)||'claude-opus-5'; }
+function settingsStatementScanHTML(){
+  const key=getApiKey();
+  return `<div class="card">
+    <div class="card-title-row"><span class="card-title">📷 Statement scanning</span></div>
+    <div style="font-size:12px;color:var(--txt2);font-weight:600;line-height:1.6;margin-bottom:10px">Upload a photo of a bank/card statement from the ＋ button and Claude reads the line items for you. This calls the Claude API directly from your browser with your own API key — it is stored only in this browser (not in the export backup above) and is sent only to api.anthropic.com.</div>
+    <div class="fgroup"><label class="flabel">Anthropic API key</label><input class="finput" type="password" placeholder="sk-ant-..." value="${esc(key)}" oninput="saveApiKeyQuiet(this.value)"></div>
+    <div class="fgroup"><label class="flabel">Model</label><select class="finput" onchange="setScanModel(this.value)">${Object.entries(SCAN_MODELS).map(([id,label])=>`<option value="${id}" ${getScanModel()===id?'selected':''}>${label}</option>`).join('')}</select></div>
+    ${key?`<button class="btn-ghost" onclick="setApiKey('')">Remove key from this browser</button>`:''}
   </div>`;
 }
+function saveApiKeyQuiet(v){ if(v.trim())localStorage.setItem(APIKEY_LS,v.trim()); else localStorage.removeItem(APIKEY_LS); } // no render() - keeps input focus while typing
+function setApiKey(v){ if(v)localStorage.setItem(APIKEY_LS,v.trim()); else localStorage.removeItem(APIKEY_LS); render(); }
+function setScanModel(v){ localStorage.setItem(MODEL_LS,v); }
 function exportData(){
   const payload={}; Object.keys(LS).forEach(k=>payload[k]=D[k]);
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
