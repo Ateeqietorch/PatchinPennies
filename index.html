@@ -1038,6 +1038,49 @@ function findLikelyDuplicate(parsed){
   });
 }
 
+// Streams a Messages API response and returns the accumulated text + stop reason.
+// Streaming avoids the request-timeout risk of a large non-streaming response
+// (several photos + a big JSON transaction list can take a while to generate).
+async function streamClaudeMessage(key,body){
+  const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key':key,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body:JSON.stringify(Object.assign({},body,{stream:true}))
+  });
+  if(!resp.ok){
+    let msg='HTTP '+resp.status;
+    try{ const d=await resp.json(); if(d&&d.error&&d.error.message) msg=d.error.message; }catch(e){}
+    throw new Error(msg);
+  }
+  const reader=resp.body.getReader();
+  const decoder=new TextDecoder();
+  let buf='', text='', stopReason=null;
+  while(true){
+    const {done,value}=await reader.read();
+    if(done) break;
+    buf+=decoder.decode(value,{stream:true});
+    let idx;
+    while((idx=buf.indexOf('\n\n'))>-1){
+      const chunk=buf.slice(0,idx); buf=buf.slice(idx+2);
+      for(const line of chunk.split('\n')){
+        if(!line.startsWith('data:')) continue;
+        const jsonStr=line.slice(5).trim();
+        if(!jsonStr) continue;
+        let evt; try{ evt=JSON.parse(jsonStr); }catch(e){ continue; }
+        if(evt.type==='content_block_delta' && evt.delta && evt.delta.type==='text_delta') text+=evt.delta.text;
+        else if(evt.type==='message_delta' && evt.delta && evt.delta.stop_reason) stopReason=evt.delta.stop_reason;
+        else if(evt.type==='error') throw new Error((evt.error&&evt.error.message)||'Stream error');
+      }
+    }
+  }
+  return {text,stopReason};
+}
+
 async function runStatementScan(){
   const key=getApiKey();
   if(!key){ S.scan.status='error'; S.scan.error='Add your Anthropic API key in Settings → App first.'; render(); return; }
@@ -1069,29 +1112,21 @@ Return every transaction you can read, even if partially obscured — do your be
   try{
     const content=S.scan.images.map(img=>({type:'image',source:{type:'base64',media_type:img.mediaType,data:img.b64}}));
     content.push({type:'text',text:prompt});
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body:JSON.stringify({
-        model:getScanModel(),
-        max_tokens:8000,
-        output_config:{format:{type:'json_schema',schema}},
-        messages:[{role:'user',content}]
-      })
+    const model=getScanModel();
+    const {text,stopReason}=await streamClaudeMessage(key,{
+      model,
+      max_tokens:model.indexOf('haiku')>-1?8192:32000,
+      output_config:{format:{type:'json_schema',schema}},
+      messages:[{role:'user',content}]
     });
-    const data=await resp.json();
-    if(!resp.ok) throw new Error((data&&data.error&&data.error.message)||('HTTP '+resp.status));
-    if(data.stop_reason==='refusal') throw new Error('Claude declined to read this image'+(data.stop_details&&data.stop_details.explanation?': '+data.stop_details.explanation:'.'));
-    const textBlock=(data.content||[]).find(b=>b.type==='text');
-    if(!textBlock) throw new Error('No response content');
-    const parsed=JSON.parse(textBlock.text);
+    if(stopReason==='refusal') throw new Error('Claude declined to read these photos.');
+    if(stopReason==='max_tokens') throw new Error(`That's a lot to read in one batch — try scanning fewer photos at a time (e.g. 3-4).`);
+    if(!text) throw new Error('No response content');
+    let parsed;
+    try{ parsed=JSON.parse(text); }
+    catch(e){ throw new Error(`Got cut off partway through reading — try scanning fewer photos at a time (e.g. 3-4).`); }
     const txns=(parsed.transactions||[]).filter(t=>t&&t.date&&t.kind);
-    if(!txns.length) throw new Error('Could not find any transactions in that image');
+    if(!txns.length) throw new Error('Could not find any transactions in those photos');
     S.scan.rows=txns.map((t,i)=>{
       const dup=t.kind!=='skip'?findLikelyDuplicate(t):null;
       const kind=t.kind==='income'?'income':t.kind==='skip'?'skip':'expense';
