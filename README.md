@@ -25,7 +25,7 @@ The card has one sole cardholder (Ateeq). A charge queues silently against the c
 
 ### Scan statement (optional, bring-your-own API key)
 
-From the ＋ button, "Scan statement" lets you upload a photo of a bank/card statement. It calls the Claude API **directly from the browser** with your own Anthropic API key (Settings → App → Statement scanning) to extract line items as structured data, flags anything that looks like it's already logged in the app so you don't double-count it, and lets you review/edit every row before importing. The API key is stored in its own `localStorage` key, separate from everything else — it is never included in the JSON export/import backup.
+From the ＋ button, "Scan statement" lets you upload one or more photos — a full statement, individual receipts, whatever — plus an optional free-text description (e.g. "this is the March Chase statement" or "the $40 charge on the 14th was a gift, categorize as Shopping"). It calls the Claude API **directly from the browser** with your own Anthropic API key (Settings → App → Statement scanning) to extract line items as structured data across all the photos at once, flags anything that looks like it's already logged in the app so you don't double-count it, and lets you review/edit every row before importing. The API key is stored in its own `localStorage` key, separate from everything else — it is never included in the JSON export/import backup.
 
 ### Backend (`Code.gs`)
 

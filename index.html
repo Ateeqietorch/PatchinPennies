@@ -515,7 +515,7 @@ const S = {
   peopleForm:null,
   moneyTab:'overview', person:'All',
   milestone:null,
-  scan:{ status:'idle', error:'', imageDataUrl:'', imageB64:'', mediaType:'', rows:null, payer:BOTH },
+  scan:{ status:'idle', error:'', images:[], notes:'', rows:null, payer:BOTH },
   syncStatus:'unknown', syncing:false,
 };
 
@@ -989,32 +989,42 @@ function settleConfirm(amount,aAhead){
 }
 
 // ─── SCAN STATEMENT (bring-your-own Claude API key, client-side only) ────────
-function resetScan(){ S.scan={status:'idle',error:'',imageDataUrl:'',imageB64:'',mediaType:'',rows:null,payer:S.scan.payer||BOTH}; }
+function resetScan(){ S.scan={status:'idle',error:'',images:[],notes:'',rows:null,payer:S.scan.payer||BOTH}; }
 function cancelScan(){ resetScan(); render(); }
 
-function handleStatementFile(input){
-  const file=input.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const maxDim=1800;
-      let w=img.width,h=img.height;
-      if(w>maxDim||h>maxDim){ const scale=maxDim/Math.max(w,h); w=Math.round(w*scale); h=Math.round(h*scale); }
-      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
-      S.scan.imageDataUrl=canvas.toDataURL('image/jpeg',0.9);
-      S.scan.imageB64=S.scan.imageDataUrl.split(',')[1];
-      S.scan.mediaType='image/jpeg';
-      S.scan.status='ready'; S.scan.error='';
-      render();
+function downscaleImageFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const maxDim=1800;
+        let w=img.width,h=img.height;
+        if(w>maxDim||h>maxDim){ const scale=maxDim/Math.max(w,h); w=Math.round(w*scale); h=Math.round(h*scale); }
+        const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        const dataUrl=canvas.toDataURL('image/jpeg',0.9);
+        resolve({dataUrl, b64:dataUrl.split(',')[1], mediaType:'image/jpeg'});
+      };
+      img.onerror=()=>reject(new Error('Could not read that image'));
+      img.src=reader.result;
     };
-    img.onerror=()=>showToast('⚠️ Could not read that image');
-    img.src=reader.result;
-  };
-  reader.onerror=()=>showToast('⚠️ Could not read that file');
-  reader.readAsDataURL(file);
+    reader.onerror=()=>reject(new Error('Could not read that file'));
+    reader.readAsDataURL(file);
+  });
 }
+async function handleStatementFile(input){
+  const files=Array.from(input.files||[]); if(!files.length) return;
+  for(const file of files){
+    try{ S.scan.images.push(await downscaleImageFile(file)); }
+    catch(e){ showToast('⚠️ '+e.message); }
+  }
+  S.scan.status='ready'; S.scan.error='';
+  render();
+  input.value='';
+}
+function removeScanImage(i){ S.scan.images.splice(i,1); if(!S.scan.images.length) S.scan.status='idle'; render(); }
+function setScanNotes(v){ S.scan.notes=v; }
 
 function findLikelyDuplicate(parsed){
   const kind=parsed.kind==='income'?'income':'expense';
@@ -1031,7 +1041,7 @@ function findLikelyDuplicate(parsed){
 async function runStatementScan(){
   const key=getApiKey();
   if(!key){ S.scan.status='error'; S.scan.error='Add your Anthropic API key in Settings → App first.'; render(); return; }
-  if(!S.scan.imageB64){ showToast('⚠️ Choose a photo first'); return; }
+  if(!S.scan.images.length){ showToast('⚠️ Choose at least one photo first'); return; }
   S.scan.status='scanning'; S.scan.error=''; render();
   const categoryNames=D.categories.map(c=>c.name);
   const schema={
@@ -1042,9 +1052,11 @@ async function runStatementScan(){
     }, required:['date','description','amount','kind','category'], additionalProperties:false } } },
     required:['transactions'], additionalProperties:false
   };
-  const prompt=`You are reading a photo of a bank or credit card statement. Extract every line-item transaction you can see.
+  const n=S.scan.images.length;
+  const notes=(S.scan.notes||'').trim();
+  const prompt=`You are reading ${n>1?`${n} photos`:'a photo'} of a bank/credit card statement and/or individual receipts. They may be multiple pages of the same statement, or separate unrelated receipts — use your judgement. Extract every line-item transaction you can see across all of them.
 
-Today's date is ${todayStr()}. If a printed date has no year, infer it from the statement's own dates or from today's date — never invent a future date unless the statement is clearly future-dated.
+Today's date is ${todayStr()}. If a printed date has no year, infer it from the statement's own dates or from today's date — never invent a future date unless clearly future-dated.
 
 For each transaction output:
 - date: YYYY-MM-DD
@@ -1053,8 +1065,10 @@ For each transaction output:
 - kind: "expense" for a purchase/charge/debit, "income" for a deposit/refund/credit paid TO the account holder, or "skip" for anything that isn't a real transaction to log (statement balance lines, minimum-payment lines, the card's own autopay/payment line, running totals, headers/footers)
 - category: pick the single closest match from this exact list (copy the text exactly): ${JSON.stringify(categoryNames)} — if nothing fits well, use ""
 
-Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.`;
+Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.${notes?`\n\nThe user also gave you this context — it may describe what the photos are, or call out specific transactions (by merchant, date, and/or amount) with corrections to their description or category. Where it's specific about a transaction, prefer the user's description/category for that transaction over what's printed:\n"""\n${notes}\n"""`:''}`;
   try{
+    const content=S.scan.images.map(img=>({type:'image',source:{type:'base64',media_type:img.mediaType,data:img.b64}}));
+    content.push({type:'text',text:prompt});
     const resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{
@@ -1067,10 +1081,7 @@ Return every transaction you can read, even if partially obscured — do your be
         model:getScanModel(),
         max_tokens:8000,
         output_config:{format:{type:'json_schema',schema}},
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:S.scan.mediaType,data:S.scan.imageB64}},
-          {type:'text',text:prompt}
-        ]}]
+        messages:[{role:'user',content}]
       })
     });
     const data=await resp.json();
@@ -1115,15 +1126,20 @@ function scanHTML(){
     </div>`;
   }
   const s=S.scan;
-  if(s.status==='scanning') return `<div class="card"><div class="loading" style="min-height:auto;padding:30px 0"><div class="loading-cat">🐱</div><div style="font-weight:800;color:var(--txt2)">Reading your statement…</div></div></div>`;
+  if(s.status==='scanning') return `<div class="card"><div class="loading" style="min-height:auto;padding:30px 0"><div class="loading-cat">🐱</div><div style="font-weight:800;color:var(--txt2)">Reading ${s.images.length>1?'your photos':'your statement'}…</div></div></div>`;
   if(s.status==='results' && s.rows) return scanResultsHTML();
+  const thumbs=s.images.map((img,i)=>`<div style="position:relative;flex:0 0 auto">
+    <img src="${img.dataUrl}" style="width:84px;height:84px;object-fit:cover;border-radius:10px;border:1.5px solid var(--border);display:block">
+    <button onclick="removeScanImage(${i})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--rose);color:#fff;border:2px solid var(--card);font-size:12px;font-weight:800;cursor:pointer;line-height:1">✕</button>
+  </div>`).join('');
   return `<div class="card">
     ${s.status==='error'?`<div class="settle" style="background:var(--rose-soft);border-color:var(--rose)"><div class="settle-msg" style="color:var(--rose)">⚠️ ${esc(s.error)}</div></div>`:''}
-    <div style="font-size:12px;color:var(--txt2);font-weight:600;margin-bottom:12px">Upload a photo of a bank or credit card statement. Claude reads each line, and anything that looks already logged gets flagged so you don't double-count it.</div>
-    ${s.imageDataUrl?`<img src="${s.imageDataUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;display:block">`:''}
-    <button class="receipt-btn" onclick="document.getElementById('statementInput').click()">${s.imageDataUrl?'📷 Choose a different photo':'📷 Choose a photo'}</button>
-    <input type="file" id="statementInput" accept="image/*" capture="environment" style="display:none" onchange="handleStatementFile(this)">
-    <button class="btn-primary" style="margin-top:10px" onclick="runStatementScan()" ${s.imageDataUrl?'':'disabled'}>Scan statement</button>
+    <div style="font-size:12px;color:var(--txt2);font-weight:600;margin-bottom:12px">Upload one or more photos — a full statement, individual receipts, whatever you've got. Claude reads every line across all of them, and anything that looks already logged gets flagged so you don't double-count it.</div>
+    ${thumbs?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">${thumbs}</div>`:''}
+    <button class="receipt-btn" onclick="document.getElementById('statementInput').click()">${s.images.length?'📷 Add more photos':'📷 Choose photo(s)'}</button>
+    <input type="file" id="statementInput" accept="image/*" capture="environment" multiple style="display:none" onchange="handleStatementFile(this)">
+    <div class="fgroup" style="margin-top:12px"><label class="flabel">Describe it (optional)</label><textarea class="finput" placeholder="e.g. &quot;This is our Chase card, March statement&quot; or &quot;the $40 charge on the 14th was a birthday gift, categorize as Shopping&quot;" oninput="setScanNotes(this.value)" style="min-height:64px">${esc(s.notes)}</textarea></div>
+    <button class="btn-primary" style="margin-top:4px" onclick="runStatementScan()" ${s.images.length?'':'disabled'}>Scan ${s.images.length>1?`${s.images.length} photos`:'statement'}</button>
   </div>`;
 }
 function scanResultsHTML(){
