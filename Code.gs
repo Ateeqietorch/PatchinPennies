@@ -276,6 +276,13 @@ var MIGRATIONS_=[
   {key:"mig_2026_08_rescan_owner", run:function(){
     reattributeByNote_(sheet(TX_SHEET),"Imported from statement scan","PaidBy","Ateeq");
     reattributeByNote_(sheet(INCOME_SHEET),"Imported from statement scan","Source","Ateeq");
+  }},
+  // Ateeq's second card ($5,000 limit), requested 2026-08-27. Fixed ID so a
+  // re-run can never create a duplicate; skipped entirely if it already exists.
+  {key:"mig_2026_08_add_5k_card", run:function(){
+    const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
+    if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;
+    addAccount({id:ID,name:"Ateeq's $5K Card",owner:"Ateeq",type:"credit",balance:0,apy:0,limit:5000});
   }}
 ];
 

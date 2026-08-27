@@ -367,7 +367,10 @@ function personById(id){ return D.people.find(p=>p.id===id); }
 function personName(id){ if(id===BOTH)return 'Both'; const p=personById(id); return p?p.name:'—'; }
 function personEmoji(id){ if(id===BOTH)return '👫'; const p=personById(id); return p?p.emoji:'🙂'; }
 function payerOptions(){ return [...D.people, {id:BOTH,name:'Both',emoji:'👫'}]; }
-function cardholderId(){ return D.people[0]?D.people[0].id:'ateeq'; } // sole cardholder per spec
+function cardholderId(){ const c=cards()[0]; if(c&&c.owner&&c.owner!=='shared') return c.owner; return D.people[0]?D.people[0].id:'ateeq'; }
+// A charge belongs to whoever holds that specific card - with more than one
+// card on the account, assuming the first person would misattribute spending.
+function cardOwnerId(accountId){ const c=acctById(accountId); return (c&&c.owner&&c.owner!=='shared')?c.owner:cardholderId(); }
 function fromServerPerson(name){ name=String(name||'').trim(); if(name==='Celeste') return 'celeste'; if(name==='Both') return BOTH; return 'ateeq'; }
 function toServerPerson(id){ if(id===BOTH) return 'Both'; const p=personById(id); return p?p.name:'Ateeq'; }
 function fromServerOwner(name){ name=String(name||'').trim(); if(name==='Celeste') return 'celeste'; if(name==='Ateeq') return 'ateeq'; return 'shared'; }
@@ -959,7 +962,7 @@ function homeHTML(){
 // ─── ADD (center + button): Expense / Income / Move Money ────────────────────
 function openAdd(){ S.addMode='expense'; if(!S.form.cat && D.categories.length) S.form.cat=D.categories[0].name; go('add'); }
 function setAddMode(m){ S.addMode=m; render(); }
-function setForm(k,v){ S.form[k]=v; if(k==='payWith'&&v!=='cash') S.form.payer=cardholderId(); render(); }
+function setForm(k,v){ S.form[k]=v; if(k==='payWith'&&v!=='cash') S.form.payer=cardOwnerId(v); render(); }
 function setIncomeForm(k,v){ S.incomeForm[k]=v; render(); }
 function setMoveForm(k,v){ S.moveForm[k]=v; render(); }
 
@@ -983,7 +986,7 @@ function expenseFormHTML(){
       <div class="seg-opt ${f.payWith==='cash'?'on':''}" onclick="setForm('payWith','cash')">💵 Cash/Debit</div>
       ${cs.map(c=>`<div class="seg-opt ${f.payWith===c.id?'on':''}" onclick="setForm('payWith','${c.id}')">💳 ${esc(c.name)}</div>`).join('')}
     </div>
-    ${f.payWith!=='cash'?`<div style="font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:5px">💡 ${esc(personName(cardholderId()))}'s card — sole cardholder. This charge queues silently and only counts as spending once the card is paid off.</div>`:''}
+    ${f.payWith!=='cash'?`<div style="font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:5px">💡 Charged to ${esc(personName(cardOwnerId(f.payWith)))}'s card. It queues silently and only counts as spending once the card is paid off.</div>`:''}
     </div>`:'';
   const needSeg = ['need','want'].map(n=>`<div class="seg-opt ${f.need===n?'on':''}" onclick="setForm('need','${n}')">${n==='need'?'🧺 Need':'✨ Want'}</div>`).join('');
   return `<div class="card">
@@ -991,7 +994,7 @@ function expenseFormHTML(){
     <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setForm('desc',this.value)"></div>
     <div class="fgroup"><label class="flabel">Category</label><div class="cpill-wrap">${catPills}</div></div>
     ${payWithBlock}
-    ${f.payWith==='cash'?`<div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>`:`<div class="fgroup"><label class="flabel">Paid by</label><div class="finput" style="font-weight:800">${personEmoji(cardholderId())} ${esc(personName(cardholderId()))} (sole cardholder)</div></div>`}
+    ${f.payWith==='cash'?`<div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>`:`<div class="fgroup"><label class="flabel">Paid by</label><div class="finput" style="font-weight:800">${personEmoji(cardOwnerId(f.payWith))} ${esc(personName(cardOwnerId(f.payWith)))} · cardholder</div></div>`}
     <div class="fgroup"><label class="flabel">Need or want?</label><div class="seg">${needSeg}</div></div>
     <div class="fgroup"><div class="cpill ${f.sub?'on':''}" onclick="setForm('sub',${!f.sub})" style="display:inline-flex"><span class="ci">📱</span>Subscription</div></div>
     <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setForm('date',this.value)"></div>
@@ -1045,8 +1048,8 @@ function submitTx(){
   if(!f.desc.trim()){ showToast('⚠️ Add a description'); return; }
   if(!f.cat){ showToast('⚠️ Add a category in Settings first'); return; }
   if(f.payWith && f.payWith!=='cash'){
-    const charge=chargeCard(f.payWith,{date:f.date,desc:f.desc,category:f.cat,payer:cardholderId(),amount:amt,notes:''});
-    syncOp('chargeCard',{id:charge.id,accountId:f.payWith,date:f.date,description:f.desc,category:f.cat,paidBy:toServerPerson(cardholderId()),amount:amt,notes:''});
+    const charge=chargeCard(f.payWith,{date:f.date,desc:f.desc,category:f.cat,payer:cardOwnerId(f.payWith),amount:amt,notes:''});
+    syncOp('chargeCard',{id:charge.id,accountId:f.payWith,date:f.date,description:f.desc,category:f.cat,paidBy:toServerPerson(cardOwnerId(f.payWith)),amount:amt,notes:''});
     showToast('💳 Charged to card — queued until paid off');
   } else {
     const tx=addTransactionRaw({date:f.date,desc:f.desc,category:f.cat,payer:f.payer,amount:amt,kind:'expense',need:f.need,sub:!!f.sub,notes:'',txType:'one-time'});
