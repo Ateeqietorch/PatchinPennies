@@ -149,6 +149,27 @@ textarea.finput{resize:none;min-height:60px}
 .qa-name{font-size:11px;font-weight:800;color:var(--txt);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qa-amt{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--txt3);display:block;margin-top:2px}
 .disclose{width:100%;background:none;border:none;color:var(--txt2);font-family:var(--font);font-size:12px;font-weight:800;cursor:pointer;padding:8px;margin-bottom:6px}
+.catfind{margin-bottom:8px;padding:9px 12px;font-size:13px}
+.catnone{width:100%;font-size:12px;color:var(--txt3);font-weight:600;margin-bottom:6px;line-height:1.4}
+.catnone span{color:var(--pink);cursor:pointer;text-decoration:underline}
+.actfind{margin-bottom:8px;padding:10px 13px;font-size:14px}
+.act-sum{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:var(--txt2);padding:2px 2px 0}
+/* Needs-attention list */
+.attn{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1.5px solid var(--border)}
+.attn:last-of-type{border-bottom:none}
+.attn-ico{font-size:19px;width:30px;height:30px;flex:0 0 30px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--bg2)}
+.attn-now .attn-ico{background:var(--peach-soft)}
+.attn-soon .attn-ico{background:var(--yellow-soft)}
+.attn-setup .attn-ico{background:var(--sky-soft)}
+.attn-body{flex:1;min-width:0}
+.attn-title{font-size:13px;font-weight:800;color:var(--txt);line-height:1.3}
+.attn-sub{font-size:11px;font-weight:600;color:var(--txt2);line-height:1.4;margin-top:2px}
+.attn-cta{flex:0 0 auto;align-self:center;background:var(--card2);border:1.5px solid var(--border);border-radius:9px;padding:7px 10px;font-family:var(--font);font-size:11px;font-weight:800;color:var(--txt);cursor:pointer;white-space:nowrap}
+.attn-cta:active{transform:scale(.96)}
+.attn-dot{display:inline-block;min-width:16px;height:16px;line-height:16px;padding:0 4px;margin-left:5px;border-radius:999px;background:var(--pink);color:#fff;font-size:10px;font-weight:800;text-align:center}
+.attn-clear{display:flex;align-items:center;gap:11px}
+.attn-clear-h{font-size:13px;font-weight:800;color:var(--txt)}
+.attn-clear-s{font-size:11px;font-weight:600;color:var(--txt2);margin-top:1px}
 
 /* Goals */
 .goal-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:15px;margin-bottom:11px;box-shadow:var(--shadow)}
@@ -513,7 +534,7 @@ const now0=new Date();
 const S = {
   view:'home', month:now0.getMonth()+1, year:now0.getFullYear(),
   modal:null,
-  addMode:'expense', addDetails:false, focusAmount:false,
+  addMode:'expense', addDetails:false, focusAmount:false, catFilter:'', refocus:null,
   form:{ desc:'', amount:'', cat:'', payer:'ateeq', date:todayStr(), notes:'', need:'need', sub:false, payWith:'cash' },
   incomeForm:{ desc:'', amount:'', source:'ateeq', date:todayStr() },
   moveForm:{ amount:'', from:'', to:'', owner:BOTH },
@@ -524,7 +545,8 @@ const S = {
   catForm:{ name:'', icon:'', budget:'', kind:'flex' }, catEditId:null,
   recurFormOpen:false, recurForm:{ name:'', kind:'bill', category:'', amount:'', payer:'ateeq', frequency:'monthly', dayOfMonth:'1', destType:'account', destId:'', flowType:'invest' }, recurEditId:null,
   peopleForm:null,
-  moneyTab:'overview', person:'All',
+  moneyTab:'overview', person:'All', attentionAll:false,
+  act:{ q:'', cat:'', kind:'all' }, // Activity view search + filters
   milestone:null,
   scan:{ status:'idle', error:'', images:[], notes:'', rows:null, payer:null }, // payer resolves to the cardholder on first open
   syncStatus:'unknown', syncing:false,
@@ -670,6 +692,103 @@ function flexTotals(){
   return {budget,spent,left:budget-spent};
 }
 
+// ─── What needs your attention ───────────────────────────────────────────────
+// One prioritised list, doing the job an onboarding wizard and a nag system
+// would each do separately. Setup gaps ("no accounts yet") and live problems
+// ("$1,100 of debt minimums committed, nothing logged this month") are the same
+// kind of thing: a specific next action. A wizard would be dead weight for a
+// household already running; this stays useful in both states.
+//
+// Only ever computed for the month you are actually in - "attention" on a month
+// that already closed is just noise you cannot act on.
+function isCurrentMonth(){ const n=new Date(); return S.month===n.getMonth()+1 && S.year===n.getFullYear(); }
+function attentionItems(){
+  if(!isCurrentMonth()) return [];
+  const out=[], day=new Date().getDate();
+  const push=(o)=>out.push(o);
+
+  // ── Setup gaps ──
+  if(!D.accounts.length) push({id:'no-accounts',sev:'setup',tab:'accounts',icon:'🏦',
+    title:'Add where your money lives',
+    sub:'Checking, savings, credit cards. Net worth and safe-to-spend need these to mean anything.',
+    action:"goSettings('accounts')", cta:'Add accounts'});
+  if(D.categories.length && !flexCategories().some(c=>+c.budget>0)) push({id:'no-budgets',sev:'setup',tab:'categories',icon:'🗂',
+    title:'Set a budget on your everyday categories',
+    sub:'Without one there is no "left to spend" number — just a running total.',
+    action:"goSettings('categories')", cta:'Set budgets'});
+  if(!D.recurring.filter(r=>r.active!==false).length) push({id:'no-recurring',sev:'setup',tab:'recurring',icon:'🔁',
+    title:'Add your recurring bills',
+    sub:'Rent, utilities, subscriptions. Once they are here they log themselves and stop eating your everyday money by surprise.',
+    action:"goSettings('recurring')", cta:'Add recurring'});
+
+  // ── Live problems ──
+  // The big one: minimums are committed money. Nothing logged means either the
+  // payments are not happening or they are not being recorded, and both matter.
+  const debtMins=D.debts.filter(d=>(+d.balance||0)>0).reduce((s,d)=>s+(+d.minPayment||0),0);
+  const paidThisMonth=debtPaysForMonth().reduce((s,p)=>s+(+p.amount||0),0);
+  if(debtMins>0 && paidThisMonth<debtMins && day>=5){
+    const owners=[...new Set(D.debts.filter(d=>(+d.balance||0)>0&&(+d.minPayment||0)>0).map(d=>personName(d.owner)))];
+    push({id:'debt-mins',sev:'now',tab:null,icon:'💸',
+      title:paidThisMonth>0?`${f0(debtMins-paidThisMonth)} of this month's debt minimums still unlogged`
+                           :`${f0(debtMins)} in debt minimums, nothing logged this month`,
+      sub:`Committed every month${owners.length?' · '+owners.join(' & '):''}. If you have paid, log it so the payoff dates are real; if not, this is the most expensive thing on the list.`,
+      action:"go('goals')", cta:'Go to Goals'});
+  }
+  // Over-budget everyday categories, worst first. Framed as a number, not a scolding.
+  const cats=catTotals();
+  flexCategories().filter(c=>+c.budget>0 && (cats[c.name]||0)>+c.budget)
+    .map(c=>({c,over:(cats[c.name]||0)-(+c.budget||0)}))
+    .sort((a,b)=>b.over-a.over).slice(0,2)
+    .forEach(({c,over})=>push({id:'over-'+c.name,sev:'soon',tab:'categories',icon:c.icon,
+      title:`${c.name} is ${f0(over)} over`,
+      sub:`${f0(cats[c.name]||0)} spent against a ${f0(c.budget)} budget. Either the budget is wrong or the habit is — both are fixable.`,
+      action:`S.act={q:'',cat:'${jsEsc(c.name)}',kind:'expense'};S.moneyTab='activity';go('money')`, cta:'See the spending'}));
+  // Utilisation is a credit-score input, not just a balance.
+  cards().filter(c=>(+c.limit||0)>0 && (+c.balance||0)/(+c.limit||1)>0.3)
+    .forEach(c=>push({id:'util-'+c.id,sev:'soon',tab:'accounts',icon:'💳',
+      title:`${c.name} is at ${Math.round((+c.balance||0)/(+c.limit||1)*100)}% of its limit`,
+      sub:`Under 30% is the usual guidance for credit scoring. Paying it down before the statement date is what moves that number.`,
+      action:`openPayCardModal('${jsEsc(c.id)}')`, cta:'Pay it down'}));
+  if(incomeTotals().total===0 && day>=5) push({id:'no-income',sev:'soon',tab:null,icon:'💰',
+    title:'No income logged this month',
+    sub:'Every "left to spend" and per-person figure is measured against income, so they are all understated until this is in.',
+    action:"openAdd();setAddMode('income')", cta:'Log income'});
+  // Anything stuck offline is silent data loss from the user's point of view.
+  const q=pendingQueue().length;
+  if(q) push({id:'queued',sev:'now',tab:'app',icon:'📡',
+    title:`${q} change${q===1?'':'s'} not yet saved to the sheet`,
+    sub:'Saved on this device and waiting for a connection. They will send themselves — nothing is lost.',
+    action:"flushQueue()", cta:'Try now'});
+  if(!localStorage.getItem(APIKEY_LS)) push({id:'no-key',sev:'setup',tab:'app',icon:'📸',
+    title:'Turn on statement scanning',
+    sub:'Add an Anthropic API key and you can photograph a statement instead of typing rows in by hand.',
+    action:"goSettings('app')", cta:'Add key'});
+
+  const rank={now:0,soon:1,setup:2};
+  return out.sort((a,b)=>rank[a.sev]-rank[b.sev]);
+}
+function attentionCount(tab){ return attentionItems().filter(i=>i.tab===tab).length; }
+function toggleAttentionAll(){ S.attentionAll=!S.attentionAll; render(); }
+function attentionHTML(){
+  const items=attentionItems();
+  if(!items.length){
+    // An empty list is information too - say it plainly instead of rendering nothing.
+    return `<div class="card attn-clear"><span style="font-size:20px">✅</span>
+      <div><div class="attn-clear-h">Nothing needs you right now</div>
+      <div class="attn-clear-s">Bills are set, budgets exist, debt payments are logged.</div></div></div>`;
+  }
+  const show=S.attentionAll?items:items.slice(0,3);
+  const rows=show.map(i=>`<div class="attn attn-${i.sev}">
+    <div class="attn-ico">${i.icon}</div>
+    <div class="attn-body"><div class="attn-title">${esc(i.title)}</div><div class="attn-sub">${esc(i.sub)}</div></div>
+    <button class="attn-cta" onclick="${i.action}">${esc(i.cta)}</button>
+  </div>`).join('');
+  const more=items.length>3?`<button class="disclose" onclick="toggleAttentionAll()">${S.attentionAll?'− Show less':`+ ${items.length-3} more`}</button>`:'';
+  return `<div class="card">
+    <div class="card-title-row" style="margin-bottom:8px"><span class="card-title">👋 Start here</span><span style="font-size:11px;font-weight:700;color:var(--txt3)">${items.length} thing${items.length===1?'':'s'}</span></div>
+    ${rows}${more}</div>`;
+}
+
 // ─── Money tab math ───────────────────────────────────────────────────────────
 function byOwner(list){ return S.person==='All'?list:list.filter(x=>(x.owner||'shared')===S.person||(x.owner||'shared')==='shared'); }
 // How much of an owned thing counts toward the person currently in view.
@@ -742,6 +861,9 @@ function render(){
   // a category tap would yank the keyboard open unasked.
   if(S.focusAmount){ S.focusAmount=false; const el=app.querySelector('.finput.big');
     if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} } }
+  // Restore focus for a field that had to re-render to do its job.
+  if(S.refocus){ const sel=S.refocus; S.refocus=null; const el=app.querySelector(sel);
+    if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} } }
 }
 function go(v){ S.view=v; window.scrollTo(0,0); render(); }
 function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.month=m;S.year=y; render(); loadForMonth(); }
@@ -788,11 +910,14 @@ function txRowHTML(t){
   const icon = isIncome?'💰':isTransfer?'🔁':catIcon(cat);
   const bg = isIncome?'var(--mint-soft)':isTransfer?'var(--sky-soft)':catColor(cat)+'33';
   const isRecur=t.txType==='recurring';
-  const badges = (t.payer===BOTH?`<span class="tx-badge badge-both">Split</span>`:'') + (isRecur?`<span class="tx-badge badge-recur">Auto</span>`:'') + (t.cardSettled?`<span class="tx-badge badge-card">Card</span>`:'');
+  const badges = (t.payer===BOTH?`<span class="tx-badge badge-both">Split</span>`:'') + (isRecur?`<span class="tx-badge badge-recur">Auto</span>`:'') + (t.cardSettled?`<span class="tx-badge badge-card">Card</span>`:'') + (t.queued?`<span class="tx-badge badge-card">Queued</span>`:'');
   const dt=String(t.date||'').slice(5).replace('-','/');
   const amtColor = isIncome?'var(--mint)':'var(--txt)';
   const amtPrefix = isIncome?'+':'';
-  return `<div class="tx" onclick="openTxDetail('${t.id}')">
+  // A queued charge has no transaction row behind it yet, so there is nothing
+  // for the detail modal to open. Say what it is instead of failing silently.
+  const tap = t.queued?`onclick="showToast('💳 Queued on ${jsEsc(t.accountName||'card')} — counts as spending when the card is paid off')"`:`onclick="openTxDetail('${t.id}')"`;
+  return `<div class="tx" ${tap}>
     <div class="tx-ico" style="background:${bg}">${icon}</div>
     <div class="tx-body"><div class="tx-desc">${esc(t.desc||'—')}${badges}</div><div class="tx-meta">${isIncome?'Income':isTransfer?'Transfer':esc(cat)} · ${personName(t.payer)} · ${dt}</div></div>
     <div class="tx-amt" style="color:${amtColor}">${amtPrefix}${f$(t.amount)}</div>
@@ -924,6 +1049,7 @@ function homeHTML(){
   const expCount = txForMonth().filter(t=>t.kind==='expense').length;
 
   return `
+    ${attentionHTML()}
     <div class="health" style="background:${healthBg}">
       <div class="health-ico">${health.emoji}</div>
       <div><div class="health-title">${health.title}</div><div class="health-sub">${health.sub}</div></div>
@@ -962,12 +1088,13 @@ function homeHTML(){
     <div class="card">
       <div class="card-title-row"><span class="card-title">🧾 Recent · ${expCount} this month · ${f0(total)} spent${net>=0?'':' · '+f0(-net)+' over income'}</span>${D.transactions.length>6?`<button class="card-toggle" onclick="go('recap')">See all</button>`:''}</div>
       ${recentList}
+      ${D.transactions.length>6?`<button class="btn-ghost" onclick="S.moneyTab='activity';go('money')">See all activity →</button>`:''}
     </div>
   `;
 }
 
 // ─── ADD (center + button): Expense / Income / Move Money ────────────────────
-function openAdd(){ S.addMode='expense'; S.addDetails=false; S.focusAmount=true; if(!S.form.cat && D.categories.length) S.form.cat=D.categories[0].name; go('add'); }
+function openAdd(){ S.addMode='expense'; S.addDetails=false; S.focusAmount=true; S.catFilter=''; if(!S.form.cat && D.categories.length) S.form.cat=D.categories[0].name; go('add'); }
 function setAddMode(m){ S.addMode=m; render(); }
 function setForm(k,v){ S.form[k]=v; if(k==='payWith'&&v!=='cash') S.form.payer=cardOwnerId(v); render(); }
 function setIncomeForm(k,v){ S.incomeForm[k]=v; render(); }
@@ -1032,10 +1159,42 @@ function quickFill(i){
   S.focusAmount=true; render();
 }
 
+// Categories ranked by how often you actually use them, so the pills you reach
+// for are first instead of whatever order they were created in. Ties keep the
+// existing order, so the list stays stable rather than reshuffling every save.
+function categoriesByUse(){
+  const use={};
+  D.transactions.filter(t=>t.kind==='expense').forEach(t=>{ if(t.category) use[t.category]=(use[t.category]||0)+1; });
+  D.cardCharges.forEach(c=>{ if(c.category) use[c.category]=(use[c.category]||0)+1; });
+  return D.categories.map((c,i)=>({c,i,n:use[c.name]||0}))
+    .sort((a,b)=>b.n-a.n||a.i-b.i).map(x=>x.c);
+}
+// Unlike the amount/description boxes, this one has to re-render - it filters
+// the pills below it. So we restore focus and caret position afterwards rather
+// than skipping the render, which keeps the keyboard up while you type.
+function setCatFilter(v){ S.catFilter=v; S.refocus='.catfind'; render(); }
+function pickCat(name){ S.form.cat=name; S.catFilter=''; render(); }
+const CAT_FILTER_AT=8; // below this the whole list fits on screen; a search box would just be clutter
+
 function expenseFormHTML(){
   const f=S.form;
   if(!f.cat && D.categories.length) f.cat=D.categories[0].name;
-  const catPills = D.categories.length? D.categories.map(c=>`<div class="cpill ${f.cat===c.name?'on':''}" onclick="setForm('cat','${jsEsc(c.name)}')"><span class="ci">${c.icon}</span>${esc(c.name)}</div>`).join('') : `<div style="font-size:12px;color:var(--txt3);font-weight:600">No categories yet — add one in Settings → Categories</div>`;
+  const ranked=categoriesByUse();
+  const q=S.catFilter.trim().toLowerCase();
+  const matched=q?ranked.filter(c=>c.name.toLowerCase().includes(q)):ranked;
+  // The selected pill always renders, even when it does not match the filter, so
+  // you can never be looking at a form whose chosen category is invisible. It is
+  // kept separate from `matched` so that "nothing matches" stays reachable -
+  // folding it in made that branch dead code.
+  const sel=catByName(f.cat);
+  const shown=(q&&sel&&!matched.some(c=>c.name===f.cat))?[sel].concat(matched):matched;
+  const noMatches=!!q&&!matched.length;
+  const catFilterBox = D.categories.length>=CAT_FILTER_AT
+    ? `<input class="finput catfind" type="text" placeholder="Filter ${D.categories.length} categories…" value="${esc(S.catFilter)}" oninput="setCatFilter(this.value)">` : '';
+  const catPills = !D.categories.length
+    ? `<div style="font-size:12px;color:var(--txt3);font-weight:600">No categories yet — add one in Settings → Categories</div>`
+    : (noMatches?`<div class="catnone">Nothing matches “${esc(S.catFilter)}” — <span onclick="setCatFilter('')">clear the filter</span>, or add it in Settings → Categories. Your current pick is still selected below.</div>`:'')
+      + shown.map(c=>`<div class="cpill ${f.cat===c.name?'on':''}" onclick="pickCat('${jsEsc(c.name)}')"><span class="ci">${c.icon}</span>${esc(c.name)}</div>`).join('');
   const payerSeg = payerOptions().map(p=>`<div class="seg-opt ${f.payer===p.id?'on':''}" onclick="setForm('payer','${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
   const cs=cards();
   const payWithBlock = cs.length? `<div class="fgroup"><label class="flabel">Paid with</label><div class="seg">
@@ -1048,7 +1207,7 @@ function expenseFormHTML(){
   return `<div class="card">
     <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setFormQ('amount',this.value)"></div>
     <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setFormQ('desc',this.value)"></div>
-    <div class="fgroup"><label class="flabel">Category</label><div class="cpill-wrap">${catPills}</div></div>
+    <div class="fgroup"><label class="flabel">Category</label>${catFilterBox}<div class="cpill-wrap">${catPills}</div></div>
     ${payWithBlock}
     ${f.payWith==='cash'?`<div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>`:`<div class="fgroup"><label class="flabel">Paid by</label><div class="finput" style="font-weight:800">${personEmoji(cardOwnerId(f.payWith))} ${esc(personName(cardOwnerId(f.payWith)))} · cardholder</div></div>`}
     ${S.addDetails?`
@@ -1463,9 +1622,66 @@ function sankeyHTML(){
   </div>`;
 }
 
+// ─── Activity: every row for the month, searchable ───────────────────────────
+// Queued card charges are folded in as pseudo-rows. They are not transactions
+// yet (they only become spending on payoff), but leaving them out meant a
+// charge you just logged was nowhere to be found, which reads as data loss.
+function activityRows(){
+  const charges=D.cardCharges.filter(c=>!c.settled&&inMonth(c.date,S.month,S.year)).map(c=>({
+    id:c.id, date:c.date, desc:c.desc, category:c.category, payer:c.payer,
+    amount:+c.amount||0, kind:'expense', queued:true,
+    accountName:(acctById(c.accountId)||{}).name||'Card'
+  }));
+  return txForMonth().concat(charges).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+function filteredActivity(){
+  const q=S.act.q.trim().toLowerCase();
+  return activityRows().filter(t=>{
+    if(S.act.kind!=='all'){
+      if(S.act.kind==='queued'&&!t.queued) return false;
+      if(S.act.kind!=='queued'&&t.kind!==S.act.kind) return false;
+    }
+    if(S.act.cat && (t.category||'')!==S.act.cat) return false;
+    if(S.person!=='All' && (t.payer||BOTH)!==S.person && (t.payer||BOTH)!==BOTH) return false;
+    if(!q) return true;
+    return String(t.desc||'').toLowerCase().includes(q)
+      || String(t.category||'').toLowerCase().includes(q)
+      || String(t.amount).includes(q)
+      || String(personName(t.payer)).toLowerCase().includes(q);
+  });
+}
+function setAct(k,v){ S.act[k]=v; if(k==='q') S.refocus='.actfind'; render(); }
+function clearAct(){ S.act={q:'',cat:'',kind:'all'}; render(); }
+function activityHTML(){
+  const rows=filteredActivity();
+  const all=activityRows();
+  const spent=rows.filter(t=>t.kind==='expense').reduce((s,t)=>s+t.amount,0);
+  const earned=rows.filter(t=>t.kind==='income').reduce((s,t)=>s+t.amount,0);
+  const active=S.act.q||S.act.cat||S.act.kind!=='all';
+  const kindSeg=[['all','All'],['expense','Spending'],['income','Income'],['queued','On card']]
+    .map(([k,l])=>`<div class="seg-opt ${S.act.kind===k?'on':''}" onclick="setAct('kind','${k}')">${l}</div>`).join('');
+  const catOpts=[`<option value="">All categories</option>`].concat(
+    categoriesByUse().map(c=>`<option value="${esc(c.name)}" ${S.act.cat===c.name?'selected':''}>${c.icon} ${esc(c.name)}</option>`)).join('');
+  const list=rows.length
+    ? rows.map(t=>txRowHTML(t)).join('')
+    : `<div class="empty"><div class="empty-ico">🔍</div><div class="empty-h">${all.length?'Nothing matches':'Nothing logged yet'}</div><div class="empty-s">${all.length?'Try a different search or clear the filters':'Tap ＋ to log your first one'}</div></div>`;
+  return `<div class="card">
+    <input class="finput actfind" type="text" placeholder="Search ${all.length} item${all.length===1?'':'s'} this month…" value="${esc(S.act.q)}" oninput="setAct('q',this.value)">
+    <div class="seg" style="margin-bottom:8px">${kindSeg}</div>
+    <select class="finput" style="margin-bottom:8px" onchange="setAct('cat',this.value)">${catOpts}</select>
+    <div class="act-sum">
+      <span>${rows.length} of ${all.length} shown</span>
+      <span>${spent>0?`<b>${f0(spent)}</b> out`:''}${spent>0&&earned>0?' · ':''}${earned>0?`<b style="color:var(--mint)">${f0(earned)}</b> in`:''}</span>
+    </div>
+    ${active?`<button class="disclose" onclick="clearAct()">✕ Clear filters</button>`:''}
+  </div>
+  <div class="card">${list}</div>`;
+}
+
 function moneyHTML(){
-  const subtabs=`<div class="money-subtabs">${[['overview','💎 Overview'],['trends','📊 Trends']].map(([t,l])=>`<div class="seg-opt ${S.moneyTab===t?'on':''}" onclick="S.moneyTab='${t}';render()">${l}</div>`).join('')}</div>`;
+  const subtabs=`<div class="money-subtabs">${[['overview','💎 Overview'],['activity','🧾 Activity'],['trends','📊 Trends']].map(([t,l])=>`<div class="seg-opt ${S.moneyTab===t?'on':''}" onclick="S.moneyTab='${t}';render()">${l}</div>`).join('')}</div>`;
   if(S.moneyTab==='trends') return subtabs+trendsHTML();
+  if(S.moneyTab==='activity') return subtabs+activityHTML();
   const accts=byOwner(spendAccounts());
   const cardAccts=byOwner(cards());
   const nw=netWorth();
@@ -1840,7 +2056,12 @@ function moneydateHTML(){
 function setSettingsTab(t){ D.settings.settingsTab=t; commit('settings'); render(); }
 function settingsHTML(){
   const tab=D.settings.settingsTab||'accounts';
-  const subnav=`<div class="settings-subnav">${[['accounts','🏦 Accounts'],['categories','🗂 Categories'],['recurring','🔁 Recurring'],['people','👫 People'],['app','⚙️ App']].map(([t,l])=>`<div class="seg-opt ${tab===t?'on':''}" onclick="setSettingsTab('${t}')">${l}</div>`).join('')}</div>`;
+  // A dot on the sections that actually have something waiting, so Settings
+  // stops being five equally-blank doors.
+  const subnav=`<div class="settings-subnav">${[['accounts','🏦 Accounts'],['categories','🗂 Categories'],['recurring','🔁 Recurring'],['people','👫 People'],['app','⚙️ App']].map(([t,l])=>{
+    const n=attentionCount(t);
+    return `<div class="seg-opt ${tab===t?'on':''}" onclick="setSettingsTab('${t}')">${l}${n?`<span class="attn-dot">${n}</span>`:''}</div>`;
+  }).join('')}</div>`;
   let body='';
   if(tab==='accounts') body=settingsAccountsHTML();
   else if(tab==='categories') body=settingsCategoriesHTML();
