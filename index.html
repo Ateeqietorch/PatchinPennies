@@ -291,7 +291,8 @@ const LS = {
   people:'pp:people', accounts:'pp:accounts', categories:'pp:categories',
   recurring:'pp:recurring', goals:'pp:goals', debts:'pp:debts',
   debtPayments:'pp:debtPayments', contributions:'pp:contributions',
-  cardCharges:'pp:cardCharges', transactions:'pp:transactions', settings:'pp:settings'
+  cardCharges:'pp:cardCharges', transactions:'pp:transactions', settings:'pp:settings',
+  insights:'pp:insights'
 };
 const BOTH='both';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -319,15 +320,15 @@ function commit(name){ localStorage.setItem(LS[name], JSON.stringify(D[name])); 
 function seedPeople(){ return [{id:'ateeq',name:'Ateeq',emoji:'🧔'},{id:'celeste',name:'Celeste',emoji:'👩'}]; }
 function seedCategories(){
   return [
-    {id:uuid(),name:'Groceries',icon:'🛒',color:'#93c5fd',budget:600},
-    {id:uuid(),name:'Dining Out',icon:'🍽️',color:'#fdba74',budget:200},
-    {id:uuid(),name:'Entertainment',icon:'🎮',color:'#c4b5fd',budget:150},
-    {id:uuid(),name:'Transportation',icon:'🚗',color:'#6ee7b7',budget:100},
-    {id:uuid(),name:'Utilities',icon:'💡',color:'#fde68a',budget:150},
-    {id:uuid(),name:'Health',icon:'🏥',color:'#fda4b8',budget:100},
-    {id:uuid(),name:'Shopping',icon:'🛍️',color:'#f0abfc',budget:150},
-    {id:uuid(),name:'Personal/Misc',icon:'📦',color:'#f9a8d4',budget:100},
-    {id:uuid(),name:"Patches' Expenses",icon:'🐱',color:'#fbcfe8',budget:75},
+    {id:uuid(),name:'Groceries',icon:'🛒',color:'#93c5fd',budget:600,kind:'flex'},
+    {id:uuid(),name:'Dining Out',icon:'🍽️',color:'#fdba74',budget:200,kind:'flex'},
+    {id:uuid(),name:'Entertainment',icon:'🎮',color:'#c4b5fd',budget:150,kind:'flex'},
+    {id:uuid(),name:'Transportation',icon:'🚗',color:'#6ee7b7',budget:100,kind:'flex'},
+    {id:uuid(),name:'Utilities',icon:'💡',color:'#fde68a',budget:150,kind:'bill'},
+    {id:uuid(),name:'Health',icon:'🏥',color:'#fda4b8',budget:100,kind:'flex'},
+    {id:uuid(),name:'Shopping',icon:'🛍️',color:'#f0abfc',budget:150,kind:'flex'},
+    {id:uuid(),name:'Personal/Misc',icon:'📦',color:'#f9a8d4',budget:100,kind:'flex'},
+    {id:uuid(),name:"Patches' Expenses",icon:'🐱',color:'#fbcfe8',budget:75,kind:'flex'},
   ];
 }
 function seedSettings(){
@@ -347,6 +348,7 @@ function initData(){
   D.cardCharges = loadKey(LS.cardCharges, []);
   D.transactions = loadKey(LS.transactions, []);
   D.settings = loadKey(LS.settings, null) || seedSettings();
+  D.insights = loadKey(LS.insights, null) || {prevCategoryTotals:{}, monthly:[]};
   Object.keys(LS).forEach(k=>commit(k));
 }
 
@@ -356,6 +358,9 @@ function catByName(name){ return D.categories.find(c=>c.name===name); }
 function catIcon(name){ const c=catByName(name); return c?c.icon:'📦'; }
 function catColor(name){ const c=catByName(name); return c?c.color:'#f9a8d4'; }
 function catBudget(name){ const c=catByName(name); return c?(+c.budget||0):0; }
+function catKind(name){ const c=catByName(name); return c&&c.kind==='bill'?'bill':'flex'; }
+function flexCategories(){ return D.categories.filter(c=>c.kind!=='bill'); }
+function billCategories(){ return D.categories.filter(c=>c.kind==='bill'); }
 
 // ─── People helpers ───────────────────────────────────────────────────────────
 function personById(id){ return D.people.find(p=>p.id===id); }
@@ -449,7 +454,7 @@ function fromServerBill(b){ return { id:b.ID, name:b.Description, kind:'bill', c
 function fromServerContrib(c){ return { id:c.ID, date:c.Date, flowType:c.FlowType==='divest'?'divest':'invest', amount:+c.Amount||0,
   accountId:c.AccountID||'', goalId:c.GoalID||'', payer:fromServerOwner(c.Owner), notes:c.Notes||'', source:c.Source||'manual' }; }
 function fromServerCharge(c){ return { id:c.ID, accountId:c.AccountID, date:c.Date, desc:c.Description, category:c.Category, payer:fromServerPerson(c.PaidBy), amount:+c.Amount||0, settled:!!c.Settled, notes:'' }; }
-function fromServerCat(c){ return { id:c.ID, name:c.Name, icon:c.Icon||'📦', color:c.Color||'#f9a8d4', budget:+c.Budget||0 }; }
+function fromServerCat(c){ return { id:c.ID, name:c.Name, icon:c.Icon||'📦', color:c.Color||'#f9a8d4', budget:+c.Budget||0, kind:c.Kind==='bill'?'bill':'flex' }; }
 
 function applyServerData(data){
   D.transactions=[].concat((data.transactions||[]).map(fromServerTx), (data.income||[]).map(fromServerIncome));
@@ -461,7 +466,8 @@ function applyServerData(data){
   D.contributions=(data.contributions||[]).map(fromServerContrib);
   D.cardCharges=(data.cardCharges||[]).map(fromServerCharge);
   if(data.categories && data.categories.length) D.categories=data.categories.map(fromServerCat);
-  ['transactions','accounts','debts','debtPayments','goals','recurring','contributions','cardCharges','categories'].forEach(k=>commit(k));
+  if(data.insights) D.insights={prevCategoryTotals:data.insights.prevCategoryTotals||{}, monthly:data.insights.monthly||[]};
+  ['transactions','accounts','debts','debtPayments','goals','recurring','contributions','cardCharges','categories','insights'].forEach(k=>commit(k));
 }
 
 // Loads the currently-selected month. If there's an unsynced queue we trust the
@@ -510,7 +516,7 @@ const S = {
   acctFormOpen:false, acctForm:{ name:'', owner:'shared', type:'checking', balance:'', apy:'', limit:'' }, acctEditId:null,
   debtFormOpen:false, debtForm:{ name:'', owner:'celeste', balance:'', apr:'', minPayment:'', highPriority:false }, debtEditId:null,
   goalFormOpen:false,
-  catForm:{ name:'', icon:'', budget:'' }, catEditId:null,
+  catForm:{ name:'', icon:'', budget:'', kind:'flex' }, catEditId:null,
   recurFormOpen:false, recurForm:{ name:'', kind:'bill', category:'', amount:'', payer:'ateeq', frequency:'monthly', dayOfMonth:'1', destType:'account', destId:'', flowType:'invest' }, recurEditId:null,
   peopleForm:null,
   moneyTab:'overview', person:'All',
@@ -520,7 +526,12 @@ const S = {
 };
 
 // ─── Month filter ─────────────────────────────────────────────────────────────
-function inMonth(dateStr,m,y){ const p=String(dateStr||'').split('-'); return +p[0]===y && +p[1]===m; }
+function inMonth(dateStr,m,y){
+  const s=String(dateStr||''); const p=s.split('-');
+  if(p.length===3 && +p[0]) return +p[0]===y && +p[1]===m;
+  const d=new Date(s); // tolerate stray non-ISO dates (e.g. "7/31/2026")
+  return !isNaN(d) && d.getFullYear()===y && d.getMonth()+1===m;
+}
 function txForMonth(){ return D.transactions.filter(t=>inMonth(t.date,S.month,S.year)); }
 function contribsForMonth(){ return D.contributions.filter(c=>inMonth(c.date,S.month,S.year)); }
 function debtPaysForMonth(){ return D.debtPayments.filter(p=>inMonth(p.date,S.month,S.year)); }
@@ -631,13 +642,27 @@ function payCard(accountId,amount,fromAccountId){
 }
 
 // ─── Plan ("every dollar has a job") ─────────────────────────────────────────
+// "Every dollar has a job", written as an equation a human can actually read:
+// income − bills − debt minimums − auto-savings − everyday budgets = left over.
+// Bills come from the recurring list (real commitments, converted to a monthly
+// equivalent), not from category budgets, so a bill never counts twice.
 function planTotals(){
-  const budgetTotal=D.categories.reduce((s,c)=>s+(+c.budget||0),0);
-  const flowInvest=D.recurring.filter(r=>r.active!==false && r.kind==='transfer' && (r.flowType||'invest')==='invest').reduce((s,r)=>s+flowMonthly(+r.amount||0,r.frequency),0);
-  const debtMins=D.debts.filter(d=>d.balance>0).reduce((s,d)=>s+(+d.minPayment||0),0);
-  const oneTimeSaved=contribsForMonth().filter(c=>c.source!=='auto').reduce((s,c)=>s+(c.flowType==='invest'?c.amount:-c.amount),0);
   const income=incomeTotals().total;
-  return {income,budgetTotal,flowInvest,debtMins,oneTimeSaved,unalloc:income-(budgetTotal+flowInvest+debtMins+Math.max(oneTimeSaved,0))};
+  const bills=D.recurring.filter(r=>r.active!==false && r.kind==='bill').reduce((s,r)=>s+flowMonthly(+r.amount||0,r.frequency),0);
+  const savings=D.recurring.filter(r=>r.active!==false && r.kind==='transfer' && (r.flowType||'invest')==='invest').reduce((s,r)=>s+flowMonthly(+r.amount||0,r.frequency),0);
+  const debtMins=D.debts.filter(d=>d.balance>0).reduce((s,d)=>s+(+d.minPayment||0),0);
+  const flexBudget=flexCategories().reduce((s,c)=>s+(+c.budget||0),0);
+  return {income,bills,savings,debtMins,flexBudget,leftover:income-bills-savings-debtMins-flexBudget};
+}
+// Everyday-spending money math for the current view month.
+// Spend in a category nobody's defined counts as everyday, so nothing hides.
+function flexTotals(){
+  const cats=catTotals();
+  const budget=flexCategories().reduce((s,c)=>s+(+c.budget||0),0);
+  const known=new Set(D.categories.map(c=>c.name));
+  let spent=flexCategories().reduce((s,c)=>s+(cats[c.name]||0),0);
+  Object.keys(cats).forEach(k=>{ if(!known.has(k)) spent+=cats[k]; });
+  return {budget,spent,left:budget-spent};
 }
 
 // ─── Money tab math ───────────────────────────────────────────────────────────
@@ -683,7 +708,7 @@ function render(){
   else if(S.view==='moneydate') body=moneydateHTML();
   else body=homeHTML();
   app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'') + (S.modal?modalHTML():'');
-  if(S.view==='money' && S.moneyTab==='trends') requestAnimationFrame(drawCharts);
+  if(S.view==='money' && S.moneyTab==='trends') (window.requestAnimationFrame||setTimeout)(drawCharts);
 }
 function go(v){ S.view=v; window.scrollTo(0,0); render(); }
 function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.month=m;S.year=y; render(); loadForMonth(); }
@@ -741,19 +766,66 @@ function txRowHTML(t){
   </div>`;
 }
 
+// The one number that answers "can I buy this?": everyday budget minus
+// everyday spend. Bills, debt, and savings live elsewhere and aren't touched.
+function safeToSpendHTML(){
+  const f=flexTotals();
+  if(!f.budget) return '';
+  const now=new Date();
+  const isCurrent = S.month===now.getMonth()+1 && S.year===now.getFullYear();
+  const daysInMonth=new Date(S.year,S.month,0).getDate();
+  const daysLeft=Math.max(daysInMonth-now.getDate()+1,1);
+  const pct=Math.min((f.spent/f.budget)*100,100);
+  const cls=pct<70?'safe':pct<95?'warn':'danger';
+  const over=f.left<0;
+  let sub;
+  if(!isCurrent) sub=`${f0(f.spent)} of the ${f0(f.budget)} everyday budget`;
+  else if(over) sub=`over by ${f0(-f.left)} — bills, savings & debt aren't affected. Next month is a fresh start.`;
+  else sub=`≈ ${f0(f.left/daysLeft)}/day for the next ${daysLeft} day${daysLeft!==1?'s':''}`;
+  return `<div class="total-card" style="background:linear-gradient(135deg,${over?'var(--peach-soft),var(--yellow-soft)':'var(--mint-soft),var(--sky-soft)'})">
+    <div class="total-eyebrow">Left for everyday spending · ${MONTHS[S.month-1]}</div>
+    <div class="total-amount" style="color:${over?'var(--peach)':'var(--txt)'}">${over?'−':''}${f0(Math.abs(f.left))}</div>
+    <div class="util-wrap" style="max-width:280px;margin:6px auto 2px"><div class="util-bar"><div class="util-fill track-fill ${cls}" style="width:${pct}%"></div></div></div>
+    <div class="total-sub">${sub}</div>
+  </div>`;
+}
+// Top categories with a vs-last-month delta, so "what are we spending most on"
+// is answered on the first screen instead of buried in Trends.
+function topCatsHTML(){
+  const cats=catTotals();
+  const entries=Object.entries(cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  if(!entries.length) return '';
+  const prev=(D.insights&&D.insights.prevCategoryTotals)||{};
+  const max=entries[0][1];
+  const rows=entries.map(([c,v])=>{
+    const p=+prev[c]||0, d=v-p;
+    const delta = p===0&&d>0 ? '' : Math.abs(d)<1 ? `<span style="color:var(--txt3)">≈ same as last mo</span>`
+      : d>0 ? `<span style="color:var(--peach)">▲ ${f0(d)} vs last mo</span>` : `<span style="color:var(--mint)">▼ ${f0(-d)} vs last mo</span>`;
+    return `<div style="margin-bottom:10px">
+      <div class="bud-row"><span class="bud-name">${catIcon(c)} ${esc(c)}</span><span class="bud-nums">${f0(v)}</span></div>
+      <div class="track" style="margin-bottom:2px"><div class="track-fill" style="width:${(v/max)*100}%;background:${catColor(c)}"></div></div>
+      <div style="font-size:10px;font-weight:700;text-align:right">${delta}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card"><div class="card-title-row"><span class="card-title">🏆 Where it's going</span><button class="card-toggle" onclick="S.moneyTab='trends';go('money')">Charts →</button></div>${rows}</div>`;
+}
+// The monthly plan as a legible equation instead of one mystery number.
 function planCardHTML(){
   const p=planTotals();
   if(p.income===0) return '';
-  const u=Math.round(p.unalloc);
-  let bg,title,sub,color;
-  if(Math.abs(u)<1){ bg='linear-gradient(135deg,var(--mint-soft),var(--sky-soft))'; title='Every dollar has a job 🎉'; sub='Income fully allocated across budgets, savings & debt'; color='var(--mint)'; }
-  else if(u>0){ bg='linear-gradient(135deg,var(--yellow-soft),var(--peach-soft))'; title='Money left to spend'; sub='Unassigned after budgets, saving & debt — give it a job or move it to savings'; color='var(--peach)'; }
-  else { bg='linear-gradient(135deg,var(--rose-soft),var(--pink-soft))'; title='Plan exceeds income'; sub="Budgets + recurring + debt payments are more than this month's income"; color='var(--rose)'; }
-  return `<div class="plan" style="background:${bg}" onclick="go('settings')">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div><div class="plan-title">${title}</div><div class="plan-sub">${sub}</div></div>
-      <div class="plan-amt" style="color:${color}">${u>0?'+':''}${f0(u)}</div>
-    </div>
+  const u=Math.round(p.leftover);
+  const line=(lbl,val,color)=>`<div class="recap-stat" style="padding:7px 0"><span class="recap-lbl" style="font-size:12px">${lbl}</span><span class="recap-val" style="font-size:13px;${color?'color:'+color:''}">${val}</span></div>`;
+  const verdict = Math.abs(u)<1 ? {t:'Every dollar has a job 🎉',c:'var(--mint)'}
+    : u>0 ? {t:`${f0(u)} not yet assigned — give it a job (savings? debt?)`,c:'var(--peach)'}
+    : {t:`Plan is ${f0(-u)} more than income — trim budgets or debt extras`,c:'var(--peach)'};
+  return `<div class="card" onclick="goSettings('recurring')" style="cursor:pointer">
+    <div class="card-title-row" style="margin-bottom:4px"><span class="card-title">🧮 This month's plan</span></div>
+    ${line('💰 Income',f$(p.income),'var(--mint)')}
+    ${line('🏠 Bills (recurring)','−'+f$(p.bills))}
+    ${line('💳 Debt minimums','−'+f$(p.debtMins))}
+    ${p.savings>0?line('🌱 Auto-savings','−'+f$(p.savings)):''}
+    ${line('🛒 Everyday budgets','−'+f$(p.flexBudget))}
+    <div style="border-top:1.5px dashed var(--border);margin-top:4px;padding-top:8px;font-size:12px;font-weight:800;color:${verdict.c}">${verdict.t}</div>
   </div>`;
 }
 function cardStripHTML(){
@@ -782,15 +854,19 @@ function homeHTML(){
   const patchesBudget = patches?(+patches.budget||0):0;
   const patchesSpent = cats["Patches' Expenses"]||0;
 
-  const netSign = net>=0?'+':'';
-  const expCount = txForMonth().filter(t=>t.kind==='expense').length;
-
-  const budgetBars = D.categories.map(c=>{
+  // Everyday budgets: only flexible categories, only ones that matter this month
+  const flexBars = flexCategories().filter(c=>(+c.budget||0)>0 || (cats[c.name]||0)>0).map(c=>{
     const spent=cats[c.name]||0, budget=+c.budget||0;
     const pct=budget>0?Math.min((spent/budget)*100,100):0;
     const cls=budget===0?'none':pct<70?'safe':pct<90?'warn':'danger';
     return `<div><div class="bud-row"><span class="bud-name">${c.icon} ${esc(c.name)}</span><span class="bud-nums">${f0(spent)}${budget>0?' / '+f0(budget):''}</span></div><div class="track"><div class="track-fill ${cls}" style="width:${pct}%"></div></div></div>`;
   }).join('');
+  // Bills: fixed commitments, shown as a compact ledger instead of budget bars
+  const billRows = billCategories().filter(c=>(cats[c.name]||0)>0 || (+c.budget||0)>0).map(c=>{
+    const spent=cats[c.name]||0;
+    return `<div class="recap-stat" style="padding:6px 0"><span class="recap-lbl" style="font-size:12px">${c.icon} ${esc(c.name)}</span><span class="recap-val" style="font-size:13px">${f0(spent)}</span></div>`;
+  }).join('');
+  const billTotal = billCategories().reduce((s,c)=>s+(cats[c.name]||0),0);
 
   let settleCard='';
   if(settle.aId && Math.abs(settle.net)>=1){
@@ -809,8 +885,10 @@ function homeHTML(){
   const personCards = D.people.map(p=>`<div class="person-card">
     <div class="pc-name">${p.emoji} ${esc(p.name)}</div>
     <div class="pc-spent">${f0(persons[p.id]||0)}</div>
-    <div class="pc-remaining good">spent this month</div>
+    <div class="pc-remaining ${(inc.byPerson[p.id]||0)>=(persons[p.id]||0)?'good':'warn'}">spent · earned ${f0(inc.byPerson[p.id]||0)}</div>
   </div>`).join('');
+
+  const expCount = txForMonth().filter(t=>t.kind==='expense').length;
 
   return `
     <div class="health" style="background:${healthBg}">
@@ -818,13 +896,7 @@ function homeHTML(){
       <div><div class="health-title">${health.title}</div><div class="health-sub">${health.sub}</div></div>
     </div>
 
-    ${planCardHTML()}
-
-    <div class="total-card">
-      <div class="total-eyebrow">Total Spent · ${MONTHS[S.month-1]}</div>
-      <div class="total-amount">${f$(total)}</div>
-      <div class="total-sub">${expCount} transaction${expCount!==1?'s':''} · ${netSign}${f0(Math.abs(net))} net 🐾</div>
-    </div>
+    ${safeToSpendHTML()}
 
     <div class="person-cards">
       ${personCards}
@@ -834,20 +906,28 @@ function homeHTML(){
       </div>`:''}
     </div>
 
+    ${topCatsHTML()}
+
     ${settleCard}
 
     ${cardStripHTML()}
 
     <div class="card">
       <div class="card-title-row">
-        <span class="card-title">📊 Budgets</span>
+        <span class="card-title">📊 Everyday budgets</span>
         <button class="card-toggle" onclick="toggleBudgets()">${D.settings.budgetsOpen?'▲ Hide':'▼ Show'}</button>
       </div>
-      ${D.settings.budgetsOpen?(budgetBars||`<div style="font-size:12px;color:var(--txt3);font-weight:600">Add categories in Settings to see budget bars</div>`):`<div style="font-size:12px;color:var(--txt3);font-weight:600">Tap show to see category budgets</div>`}
+      ${D.settings.budgetsOpen?(flexBars||`<div style="font-size:12px;color:var(--txt3);font-weight:600">Add categories in Settings to see budget bars</div>`):`<div style="font-size:12px;color:var(--txt3);font-weight:600">Tap show to see category budgets</div>`}
+      ${D.settings.budgetsOpen&&billRows?`<div style="border-top:1.5px dashed var(--border);margin-top:10px;padding-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:11px;font-weight:900;color:var(--txt2);text-transform:uppercase;letter-spacing:.5px">🏠 Bills</span><span class="bud-nums">${f0(billTotal)} this month</span></div>
+        ${billRows}
+      </div>`:''}
     </div>
 
+    ${planCardHTML()}
+
     <div class="card">
-      <div class="card-title-row"><span class="card-title">🧾 Recent</span>${D.transactions.length>6?`<button class="card-toggle" onclick="go('recap')">See all</button>`:''}</div>
+      <div class="card-title-row"><span class="card-title">🧾 Recent · ${expCount} this month · ${f0(total)} spent${net>=0?'':' · '+f0(-net)+' over income'}</span>${D.transactions.length>6?`<button class="card-toggle" onclick="go('recap')">See all</button>`:''}</div>
       ${recentList}
     </div>
   `;
@@ -1106,7 +1186,7 @@ For each transaction output:
 - description: the merchant/payee as printed (clean up obvious OCR noise but keep it recognizable)
 - amount: a positive number, no currency symbol
 - kind: "expense" for a purchase/charge/debit, "income" for a deposit/refund/credit paid TO the account holder, or "skip" for anything that isn't a real transaction to log (statement balance lines, minimum-payment lines, the card's own autopay/payment line, running totals, headers/footers)
-- category: pick the single closest match from this exact list (copy the text exactly): ${JSON.stringify(categoryNames)} — if nothing fits well, use ""
+- category: pick the single closest match from this exact list (copy the text exactly): ${JSON.stringify(categoryNames)}. Only if nothing on the list is a reasonable fit, propose a sensible NEW category name instead (Title Case, 1-3 words, e.g. "Travel" or "Car Repairs") — do not force a bad match and do not leave it blank.
 
 Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.${notes?`\n\nThe user also gave you this context — it may describe what the photos are, or call out specific transactions (by merchant, date, and/or amount) with corrections to their description or category. Where it's specific about a transaction, prefer the user's description/category for that transaction over what's printed:\n"""\n${notes}\n"""`:''}`;
   try{
@@ -1130,8 +1210,11 @@ Return every transaction you can read, even if partially obscured — do your be
     S.scan.rows=txns.map((t,i)=>{
       const dup=t.kind!=='skip'?findLikelyDuplicate(t):null;
       const kind=t.kind==='income'?'income':t.kind==='skip'?'skip':'expense';
+      const proposed=(t.category||'').trim();
+      // Keep Claude's proposed category even if it isn't in the list yet —
+      // the review screen marks it "(new)" and importing creates it for real.
       return { id:i, date:t.date, desc:t.description||'', amount:Math.abs(+t.amount||0), kind,
-        category:categoryNames.includes(t.category)?t.category:(categoryNames[0]||''),
+        category:proposed||(categoryNames[0]||''), isNewCategory:!!proposed&&!categoryNames.includes(proposed),
         include: kind!=='skip' && !dup, duplicate:!!dup };
     });
     S.scan.status='results';
@@ -1194,6 +1277,7 @@ function scanResultsHTML(){
         <input class="finput" type="text" inputmode="decimal" value="${r.amount}" onchange="setScanRowField(${r.id},'amount',this.value)" style="padding:6px 8px;font-size:12px;width:76px;font-family:var(--mono)">
         <select class="finput" onchange="setScanRowField(${r.id},'category',this.value)" style="padding:6px 8px;font-size:11px;flex:1" ${r.kind==='income'?'disabled':''}>
           ${D.categories.map(c=>`<option value="${jsEsc(c.name)}" ${r.category===c.name?'selected':''}>${c.icon} ${esc(c.name)}</option>`).join('')}
+          ${r.isNewCategory&&!catByName(r.category)?`<option value="${jsEsc(r.category)}" selected>✨ ${esc(r.category)} (new)</option>`:''}
         </select>
         <select class="finput" onchange="setScanRowField(${r.id},'kind',this.value)" style="padding:6px 8px;font-size:11px;flex:0 0 88px">
           <option value="expense" ${r.kind==='expense'?'selected':''}>Expense</option>
@@ -1216,6 +1300,12 @@ function importScanRows(){
   const rows=(S.scan.rows||[]).filter(r=>r.include && r.kind!=='skip');
   if(!rows.length){ showToast('⚠️ Nothing selected to import'); return; }
   rows.forEach(r=>{
+    // A proposed category that doesn't exist yet becomes real on import
+    if(r.kind!=='income' && r.category && !catByName(r.category)){
+      const c={id:uuid(),name:r.category,icon:'✨',color:FALLBACK_COLORS[D.categories.length%FALLBACK_COLORS.length],budget:0,kind:'flex'};
+      D.categories.push(c); commit('categories');
+      syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:0,kind:'flex'});
+    }
     const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:S.scan.payer,amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
     syncOp(r.kind==='income'?'addIncome':'addTransaction', r.kind==='income'?toServerIncomeParams(tx):toServerTxParams(tx));
   });
@@ -1362,8 +1452,13 @@ function drawCharts(){
   }
   const trendCanvas=document.getElementById('trendChart');
   if(trendCanvas){
-    const labels=[],exp=[],inc=[];
-    for(let i=5;i>=0;i--){
+    let labels=[],exp=[],inc=[];
+    const series=(D.insights&&D.insights.monthly)||[];
+    if(series.length){
+      // server-computed 6-month series (the client only ever holds one month of rows)
+      labels=series.map(b=>MONTHS_SHORT[b.month-1]);
+      exp=series.map(b=>b.expenses); inc=series.map(b=>b.income);
+    } else for(let i=5;i>=0;i--){
       let m=S.month-i,y=S.year; while(m<=0){m+=12;y--;}
       labels.push(MONTHS_SHORT[m-1]);
       const monthTx=D.transactions.filter(t=>inMonth(t.date,m,y));
@@ -1699,18 +1794,22 @@ function removeAccount(id){
 function settingsCategoriesHTML(){
   const total=D.categories.reduce((s,c)=>s+(+c.budget||0),0);
   const rows=D.categories.map(c=>`<div class="flow">
-    <div class="flow-body" onclick="openCatEdit('${c.id}')"><div class="flow-name">${c.icon} ${esc(c.name)}</div><div class="flow-meta">${c.budget>0?f0(c.budget)+'/mo budget':'no budget set'}</div></div>
+    <div class="flow-body" onclick="openCatEdit('${c.id}')"><div class="flow-name">${c.icon} ${esc(c.name)}</div><div class="flow-meta">${c.kind==='bill'?'🏠 bill':'🛒 everyday'}${c.budget>0?' · '+f0(c.budget)+'/mo':' · no budget set'}</div></div>
     <button class="iconbtn danger" onclick="removeCategory('${c.id}')">🗑</button>
   </div>`).join('');
   return `<div class="card">
     <div class="card-title-row"><span class="card-title">🗂 Categories & budgets</span></div>
-    <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Budgets total ${f0(total)}/mo. Tap a category to edit its icon or budget — it shows up in the Add picker immediately.</div>
+    <div style="font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px">Budgets total ${f0(total)}/mo. "Bill" categories (rent, utilities…) are fixed commitments; "everyday" ones are the spending you actually decide day to day — Home's "left to spend" number only counts everyday budgets.</div>
     ${rows||`<div class="empty" style="padding:18px"><div class="empty-ico">🗂</div><div class="empty-h">No categories yet</div></div>`}
     <div class="formbox" style="margin-top:12px">
       <div class="flabel" style="margin-bottom:8px">${S.catEditId?'Edit category':'Add a category'}</div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input class="finput" type="text" maxlength="3" placeholder="🎸" value="${esc(S.catForm.icon)}" oninput="S.catForm.icon=this.value" style="flex:0 0 58px;text-align:center">
         <input class="finput" type="text" placeholder="Name (e.g. Comedy shows)" value="${esc(S.catForm.name)}" oninput="S.catForm.name=this.value" style="flex:1" ${S.catEditId?'disabled':''}>
+      </div>
+      <div class="seg" style="margin-bottom:8px">
+        <div class="seg-opt ${S.catForm.kind!=='bill'?'on':''}" onclick="S.catForm.kind='flex';render()">🛒 Everyday</div>
+        <div class="seg-opt ${S.catForm.kind==='bill'?'on':''}" onclick="S.catForm.kind='bill';render()">🏠 Bill</div>
       </div>
       <div style="display:flex;gap:8px">
         <input class="finput" type="number" inputmode="decimal" placeholder="Monthly limit (optional)" value="${esc(S.catForm.budget)}" oninput="S.catForm.budget=this.value" style="flex:1">
@@ -1722,29 +1821,30 @@ function settingsCategoriesHTML(){
 }
 function openCatEdit(id){
   const c=D.categories.find(x=>x.id===id); if(!c)return;
-  S.catForm={name:c.name,icon:c.icon,budget:c.budget?String(c.budget):''};
+  S.catForm={name:c.name,icon:c.icon,budget:c.budget?String(c.budget):'',kind:c.kind==='bill'?'bill':'flex'};
   S.catEditId=id; render();
 }
-function cancelCatEdit(){ S.catEditId=null; S.catForm={name:'',icon:'',budget:''}; render(); }
+function cancelCatEdit(){ S.catEditId=null; S.catForm={name:'',icon:'',budget:'',kind:'flex'}; render(); }
 function submitCategory(){
   const f=S.catForm;
+  const kind=f.kind==='bill'?'bill':'flex';
   if(S.catEditId){
     const c=D.categories.find(x=>x.id===S.catEditId);
-    if(c){ c.icon=(f.icon||'📦').trim()||'📦'; c.budget=parseFloat(f.budget)||0; commit('categories');
-      syncOp('updateCategory',{id:c.id,icon:c.icon,budget:c.budget}); }
+    if(c){ c.icon=(f.icon||'📦').trim()||'📦'; c.budget=parseFloat(f.budget)||0; c.kind=kind; commit('categories');
+      syncOp('updateCategory',{id:c.id,icon:c.icon,budget:c.budget,kind:c.kind}); }
     showToast('✏️ Category updated');
     S.catEditId=null;
   } else {
     const name=(f.name||'').trim();
     if(!name){ showToast('⚠️ Name the category'); return; }
     if(D.categories.some(c=>c.name.toLowerCase()===name.toLowerCase())){ showToast('⚠️ That category already exists'); return; }
-    const c={id:uuid(),name,icon:(f.icon||'').trim()||'📦',color:FALLBACK_COLORS[D.categories.length%FALLBACK_COLORS.length],budget:parseFloat(f.budget)||0};
+    const c={id:uuid(),name,icon:(f.icon||'').trim()||'📦',color:FALLBACK_COLORS[D.categories.length%FALLBACK_COLORS.length],budget:parseFloat(f.budget)||0,kind};
     D.categories.push(c);
     commit('categories');
-    syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:c.budget});
+    syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:c.budget,kind:c.kind});
     showToast('🗂 '+name+' added');
   }
-  S.catForm={name:'',icon:'',budget:''};
+  S.catForm={name:'',icon:'',budget:'',kind:'flex'};
   render();
 }
 function removeCategory(id){

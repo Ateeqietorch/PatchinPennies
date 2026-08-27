@@ -45,8 +45,37 @@ function getAll(month,year){
     contributions: getContributions(month,year).contributions,
     cardCharges: getCardCharges().charges,
     recurringBills: getRecurringBills().bills,
-    categories: getCategories().categories
+    categories: getCategories().categories,
+    insights: computeInsights_(month,year)
   };
+}
+
+// Cross-month context the client can't compute from a single month's rows:
+// last-6-months income/expense series and the previous month's per-category
+// totals (for "vs last month" deltas). One read of each sheet.
+function computeInsights_(month,year){
+  const m0=+month||(new Date().getMonth()+1), y0=+year||(new Date().getFullYear());
+  let pm=m0-1, py=y0; if(pm<1){pm=12;py--;}
+  const buckets={}; const prevCat={};
+  const key=(y,m)=>y+"-"+m;
+  rowsAsObjects(sheet(TX_SHEET)).forEach(t=>{
+    const d=(t.Date instanceof Date)?t.Date:new Date(t.Date); if(isNaN(d)) return;
+    const y=d.getFullYear(), m=d.getMonth()+1;
+    (buckets[key(y,m)]=buckets[key(y,m)]||{exp:0,inc:0}).exp+=num(t.Amount);
+    if(y===py&&m===pm){ const c=t.Category||"Personal/Misc"; prevCat[c]=(prevCat[c]||0)+num(t.Amount); }
+  });
+  rowsAsObjects(sheet(INCOME_SHEET)).forEach(i=>{
+    const d=(i.Date instanceof Date)?i.Date:new Date(i.Date); if(isNaN(d)) return;
+    const k=key(d.getFullYear(),d.getMonth()+1);
+    (buckets[k]=buckets[k]||{exp:0,inc:0}).inc+=num(i.Amount);
+  });
+  const monthly=[];
+  for(let i=5;i>=0;i--){
+    let m=m0-i, y=y0; while(m<1){m+=12;y--;}
+    const b=buckets[key(y,m)]||{exp:0,inc:0};
+    monthly.push({month:m,year:y,expenses:Math.round(b.exp*100)/100,income:Math.round(b.inc*100)/100});
+  }
+  return {prevCategoryTotals:prevCat, monthly:monthly};
 }
 
 // ─── Router ─────────────────────────────────────────────────────────────────
@@ -54,6 +83,7 @@ function doGet(e){
   const a=(e.parameter.action)||"getTransactions";
   let r;
   try{
+    maybeMigrate_();
     switch(a){
       case "getAll":             r=getAll(e.parameter.month,e.parameter.year); break;
       case "getTransactions":    r=getTransactions(e.parameter.month,e.parameter.year); break;
@@ -157,18 +187,19 @@ function setup(){
     ensureCols(rc,["ID","Description","Category","PaidBy","Amount","Active","Frequency","DayOfMonth","LastRun"]);
     backfillIds(rc);
   }
-  // Categories & budgets (shared so both people see the same picker)
+  // Categories & budgets (shared so both people see the same picker).
+  // Kind: 'bill' = fixed/recurring commitments, 'flex' = everyday spending choices.
   let cat=book.getSheetByName(CAT_SHEET);
   if(!cat){
     cat=book.insertSheet(CAT_SHEET);
-    cat.appendRow(["ID","Name","Icon","Color","Budget"]);
-    cat.getRange(1,1,1,5).setFontWeight("bold");
-    [["Groceries","🛒","#93c5fd",600],["Dining Out","🍽️","#fdba74",200],["Entertainment","🎮","#c4b5fd",150],
-     ["Transportation","🚗","#6ee7b7",100],["Utilities","💡","#fde68a",150],["Health","🏥","#fda4b8",100],
-     ["Shopping","🛍️","#f0abfc",150],["Personal/Misc","📦","#f9a8d4",100],["Patches' Expenses","🐱","#fbcfe8",75],
-     ["Fixed","🏠","#a5b4fc",0],["Subscriptions","📱","#e879f9",0],["Donation","❤️","#fca5a5",0]
-    ].forEach(r=>cat.appendRow([uuid(),r[0],r[1],r[2],r[3]]));
-  }
+    cat.appendRow(["ID","Name","Icon","Color","Budget","Kind"]);
+    cat.getRange(1,1,1,6).setFontWeight("bold");
+    [["Groceries","🛒","#93c5fd",600,"flex"],["Dining Out","🍽️","#fdba74",200,"flex"],["Entertainment","🎮","#c4b5fd",150,"flex"],
+     ["Transportation","🚗","#6ee7b7",100,"flex"],["Utilities","💡","#fde68a",150,"bill"],["Health","🏥","#fda4b8",100,"flex"],
+     ["Shopping","🛍️","#f0abfc",150,"flex"],["Personal/Misc","📦","#f9a8d4",100,"flex"],["Patches' Expenses","🐱","#fbcfe8",75,"flex"],
+     ["Rent","🏠","#a5b4fc",1800,"bill"],["Subscriptions","📱","#e879f9",0,"bill"],["Donation","❤️","#fca5a5",0,"bill"]
+    ].forEach(r=>cat.appendRow([uuid(),r[0],r[1],r[2],r[3],r[4]]));
+  } else ensureCols(cat,["ID","Name","Icon","Color","Budget","Kind"]);
   // Accounts
   let ac=book.getSheetByName(ACCT_SHEET);
   const acNew=!ac;
@@ -218,6 +249,94 @@ function setup(){
   let co=book.getSheetByName(CONTRIB_SHEET);
   if(!co){ co=book.insertSheet(CONTRIB_SHEET); co.appendRow(["ID","Date","FlowType","Amount","AccountID","GoalID","Owner","Notes","Source"]); co.getRange(1,1,1,9).setFontWeight("bold"); }
   return "Setup complete. Now run installTriggers() once (safe to re-run too).";
+}
+
+// ─── One-time data migrations (guarded; run lazily on first request) ─────────
+// Each migration runs exactly once per deployment of its key, protected by a
+// script lock so two devices hitting the API simultaneously can't double-run it.
+function maybeMigrate_(){
+  const props=PropertiesService.getScriptProperties();
+  if(props.getProperty("mig_2026_08_cleanup")) return;
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(20000)) return; // someone else is running it; they'll finish
+  try{
+    if(props.getProperty("mig_2026_08_cleanup")) return;
+    mig_2026_08_cleanup_();
+    props.setProperty("mig_2026_08_cleanup", todayStr());
+  } finally { lock.releaseLock(); }
+}
+
+// Cleanup agreed with Ateeq on 2026-08-27:
+//  - $900 Zelle to Celeste was his half of rent -> already covered by the $1800
+//    "Both" rent rows, so it double-counted rent; delete it.
+//  - Two of the three duplicate Internet $88.73 rows on 8/14; keep one.
+//  - July card payoffs should total exactly $1000: delete the $874.04 partial
+//    duplicate and the $870 "Credit card" expense (payments aren't spending in
+//    this model - spend is counted when queued charges settle).
+//  - CardCharges: remove the $125.96 phantom remnant of the bad partial settle
+//    and the $500 "Credit card" payment mislogged as a charge; recompute the
+//    card balance from what's actually still queued.
+//  - Statement-scan imports were from Ateeq's debit card but got logged as
+//    "Both": reattribute to Ateeq (income row included).
+//  - Category hygiene: "Fixed" rows -> Rent/Utilities, Gym's "Recurring" ->
+//    Health, retire the Fixed category, and tag every category as bill/flex.
+function mig_2026_08_cleanup_(){
+  const tx=sheet(TX_SHEET);
+  ["1c0c9442-627f-4f92-8973-39839086b4e3",  // $900 Zelle (rent settlement, double-count)
+   "799b6aee-7d99-4bf3-9f96-6bcf8e1d3003",  // Internet dupe 2
+   "24d4057b-97d3-46dc-90bb-3767656b9471",  // Internet dupe 3
+   "04b30ca8-4257-4187-8059-96e66857a08a",  // $874.04 July payoff duplicate
+   "b70a702f-0604-4a94-a673-a3372e579fde"   // $870 card payment logged as expense
+  ].forEach(id=>deleteRowById(tx,id));
+
+  const cc=sheet(CARDCHG_SHEET);
+  ["545e7dbd-b6ce-4c83-bc75-345a235bee56",  // $125.96 phantom remnant of bad partial settle
+   "277d18cc-39ba-4749-a8a8-c37b74c84f4c"   // $500 payment mislogged as a charge
+  ].forEach(id=>deleteRowById(cc,id));
+
+  // Card balance = sum of charges still queued (source of truth for the bar)
+  const CARD_ID="7a46e298-f0ed-4746-966d-2413dc6cf460";
+  const owed=getCardCharges().charges.filter(c=>c.AccountID===CARD_ID && !c.Settled).reduce((s,c)=>s+c.Amount,0);
+  updateRowById(sheet(ACCT_SHEET),CARD_ID,{Balance:Math.round(owed*100)/100});
+
+  // Statement-scan rows are Ateeq's debit card, not "Both"
+  reattributeByNote_(tx,"Imported from statement scan","PaidBy","Ateeq");
+  reattributeByNote_(sheet(INCOME_SHEET),"Imported from statement scan","Source","Ateeq");
+
+  // Normalize the one slash-format date so month filters catch it everywhere
+  updateRowById(tx,"2cc7df7c-5158-4c9a-bc8b-a451f0df9f00",{Date:"2026-07-31"});
+
+  // Category hygiene on old rows
+  [["ca8d63fe-7cb4-43fa-9586-0f5b0e89ca33","Rent"],["89640a44-29d0-4e43-ba18-94017b53fd95","Rent"],
+   ["206161b7-7380-4173-9b90-5e3f3c6650fa","Rent"],["08acec1e-aaa4-4667-ab4e-fa8b38563a8b","Rent"],
+   ["b13a114a-7a97-4a53-ae1a-753b1a387150","Utilities"],["1fc9d722-79c5-422f-8542-47f971032a0d","Utilities"],
+   ["b9af9b66-b932-4655-9da5-eb724ecb0329","Health"]
+  ].forEach(p=>updateRowById(tx,p[0],{Category:p[1]}));
+  // Rent recurring bill seeds under the Rent category from now on
+  updateRowById(sheet(RECUR_SHEET),"b8f08e8c-9ad1-4296-b7d9-5e6ff35318f2",{Category:"Rent"});
+
+  // Retire "Fixed" (empty after the recats) and tag every category bill/flex
+  const cat=sheet(CAT_SHEET);
+  ensureCols(cat,["ID","Name","Icon","Color","Budget","Kind"]);
+  deleteRowById(cat,"f5d45bf5-df4c-455d-978d-f81e3de49fd3"); // Fixed
+  const BILLS={"Rent":1,"Utilities":1,"Subscriptions":1,"Donation":1};
+  const data=cat.getDataRange().getValues(); const hdr=data[0].map(String);
+  const iName=hdr.indexOf("Name"), iKind=hdr.indexOf("Kind");
+  for(let i=1;i<data.length;i++){
+    const want=BILLS[String(data[i][iName])]?"bill":"flex";
+    if(String(data[i][iKind]||"")!==want) cat.getRange(i+1,iKind+1).setValue(want);
+  }
+}
+function reattributeByNote_(sh,noteMarker,col,value){
+  if(!sh||sh.getLastRow()<2) return;
+  const data=sh.getDataRange().getValues(); const hdr=data[0].map(String);
+  const iNotes=hdr.indexOf("Notes"), iCol=hdr.indexOf(col);
+  if(iNotes===-1||iCol===-1) return;
+  for(let i=1;i<data.length;i++){
+    if(String(data[i][iNotes]||"").indexOf(noteMarker)>-1 && String(data[i][iCol])!==value){
+      sh.getRange(i+1,iCol+1).setValue(value);
+    }
+  }
 }
 
 function ensureCols(sh,need){
@@ -378,18 +497,21 @@ function autoLogRecurring(){ runRecurringBills(new Date()); }
 // ─── Categories & budgets (shared across devices) ────────────────────────────
 function getCategories(){
   const out=rowsAsObjects(sheet(CAT_SHEET)).map(c=>({
-    ID:c.ID, Name:c.Name, Icon:c.Icon||"📦", Color:c.Color||"#f9a8d4", Budget:num(c.Budget)
+    ID:c.ID, Name:c.Name, Icon:c.Icon||"📦", Color:c.Color||"#f9a8d4", Budget:num(c.Budget),
+    Kind:String(c.Kind||"flex")==="bill"?"bill":"flex"
   }));
   return {categories:out};
 }
 function addCategory(p){
-  const sh=sheet(CAT_SHEET); const id=p.id||uuid();
-  sh.appendRow([id,p.name||"Category",p.icon||"📦",p.color||"#f9a8d4",num(p.budget||0)]);
+  const sh=sheet(CAT_SHEET); ensureCols(sh,["ID","Name","Icon","Color","Budget","Kind"]);
+  const id=p.id||uuid();
+  sh.appendRow([id,p.name||"Category",p.icon||"📦",p.color||"#f9a8d4",num(p.budget||0),p.kind==="bill"?"bill":"flex"]);
   return {success:true,id};
 }
 function updateCategory(p){
   const found=updateRowById(sheet(CAT_SHEET),p.id,Object.assign({},
-    p.icon?{Icon:p.icon}:{}, p.budget!=null?{Budget:num(p.budget)}:{}));
+    p.icon?{Icon:p.icon}:{}, p.budget!=null?{Budget:num(p.budget)}:{},
+    p.kind?{Kind:p.kind==="bill"?"bill":"flex"}:{}));
   return found?{success:true}:{error:"Not found"};
 }
 function deleteCategory(id){ return deleteRowById(sheet(CAT_SHEET),id)?{success:true}:{error:"Not found"}; }
