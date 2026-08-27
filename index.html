@@ -147,6 +147,8 @@ textarea.finput{resize:none;min-height:60px}
 .qa-btn:active{transform:scale(.96);background:var(--pink-soft)}
 .qa-ico{font-size:19px;display:block;margin-bottom:3px}
 .qa-name{font-size:11px;font-weight:800;color:var(--txt);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qa-amt{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--txt3);display:block;margin-top:2px}
+.disclose{width:100%;background:none;border:none;color:var(--txt2);font-family:var(--font);font-size:12px;font-weight:800;cursor:pointer;padding:8px;margin-bottom:6px}
 
 /* Goals */
 .goal-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:15px;margin-bottom:11px;box-shadow:var(--shadow)}
@@ -511,7 +513,7 @@ const now0=new Date();
 const S = {
   view:'home', month:now0.getMonth()+1, year:now0.getFullYear(),
   modal:null,
-  addMode:'expense',
+  addMode:'expense', addDetails:false, focusAmount:false,
   form:{ desc:'', amount:'', cat:'', payer:'ateeq', date:todayStr(), notes:'', need:'need', sub:false, payWith:'cash' },
   incomeForm:{ desc:'', amount:'', source:'ateeq', date:todayStr() },
   moveForm:{ amount:'', from:'', to:'', owner:BOTH },
@@ -735,6 +737,11 @@ function render(){
   else body=homeHTML();
   app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'') + (S.modal?modalHTML():'');
   if(S.view==='money' && S.moneyTab==='trends') (window.requestAnimationFrame||setTimeout)(drawCharts);
+  // One-shot: put the cursor in the amount box when the Add sheet opens, so the
+  // keyboard is already up. Deliberately NOT on every render - re-focusing after
+  // a category tap would yank the keyboard open unasked.
+  if(S.focusAmount){ S.focusAmount=false; const el=app.querySelector('.finput.big');
+    if(el){ el.focus(); try{ el.setSelectionRange(el.value.length,el.value.length); }catch(e){} } }
 }
 function go(v){ S.view=v; window.scrollTo(0,0); render(); }
 function shiftMonth(d){ let m=S.month+d,y=S.year; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.month=m;S.year=y; render(); loadForMonth(); }
@@ -960,11 +967,20 @@ function homeHTML(){
 }
 
 // ─── ADD (center + button): Expense / Income / Move Money ────────────────────
-function openAdd(){ S.addMode='expense'; if(!S.form.cat && D.categories.length) S.form.cat=D.categories[0].name; go('add'); }
+function openAdd(){ S.addMode='expense'; S.addDetails=false; S.focusAmount=true; if(!S.form.cat && D.categories.length) S.form.cat=D.categories[0].name; go('add'); }
 function setAddMode(m){ S.addMode=m; render(); }
 function setForm(k,v){ S.form[k]=v; if(k==='payWith'&&v!=='cash') S.form.payer=cardOwnerId(v); render(); }
 function setIncomeForm(k,v){ S.incomeForm[k]=v; render(); }
 function setMoveForm(k,v){ S.moveForm[k]=v; render(); }
+// Typed fields must NOT re-render: render() replaces app.innerHTML wholesale,
+// which destroys the <input> mid-keystroke and drops focus, so the phone
+// keyboard closed after every single character. Nothing on screen depends on
+// these values as you type, so we just record them. Taps (pills, segments)
+// still go through the rendering setters above.
+function setFormQ(k,v){ S.form[k]=v; }
+function setIncomeFormQ(k,v){ S.incomeForm[k]=v; }
+function setMoveFormQ(k,v){ S.moveForm[k]=v; }
+function toggleAddDetails(){ S.addDetails=!S.addDetails; render(); }
 
 function addHTML(){
   const chooser=`<div class="addchooser">
@@ -973,7 +989,47 @@ function addHTML(){
   if(S.addMode==='income') return chooser+incomeFormHTML();
   if(S.addMode==='move') return chooser+moveFormHTML();
   if(S.addMode==='scan') return chooser+scanHTML();
-  return chooser+expenseFormHTML();
+  return chooser+quickAddHTML()+expenseFormHTML();
+}
+
+// One-tap prefill built from what you actually buy. Everything here is derived
+// from your own logged history - an earlier Quick Add shipped hardcoded values
+// and fired a canned $1,000 charge, so nothing is baked in any more.
+let QUICK=[];
+function frequentTx(n){
+  const src=D.transactions.filter(t=>t.kind==='expense')
+    .concat(D.cardCharges.map(c=>({desc:c.desc,category:c.category,amount:c.amount,date:c.date})));
+  const map=new Map();
+  src.forEach(t=>{
+    const d=String(t.desc||'').trim(); if(!d) return;
+    const key=d.toLowerCase()+'|'+(t.category||'');
+    const e=map.get(key);
+    if(e){ e.count++; e.total+=+t.amount||0; if(String(t.date||'')>String(e.date)){ e.date=t.date; e.desc=d; } }
+    else map.set(key,{desc:d,category:t.category||'',count:1,total:+t.amount||0,date:t.date||''});
+  });
+  return [...map.values()]
+    .sort((a,b)=>b.count-a.count||String(b.date).localeCompare(String(a.date)))
+    .slice(0,n)
+    .map(e=>Object.assign({},e,{amount:Math.round((e.total/e.count)*100)/100}));
+}
+function quickAddHTML(){
+  QUICK=frequentTx(6);
+  if(QUICK.length<2) return '';
+  const btns=QUICK.map((q,i)=>`<div class="qa-btn" onclick="quickFill(${i})">
+    <span class="qa-ico">${catIcon(q.category)}</span>
+    <span class="qa-name">${esc(q.desc)}</span>
+    <span class="qa-amt">${q.count>1?'~':''}${f$(q.amount)}</span>
+  </div>`).join('');
+  return `<div class="card"><div class="card-title-row" style="margin-bottom:8px"><span class="card-title">\u26a1 Again?</span></div><div class="qa-row">${btns}</div></div>`;
+}
+// Prefills only - it never submits for you. The amount is your average for that
+// item, so the common case is "tap, glance, save" and an unusual one is a quick edit.
+function quickFill(i){
+  const q=QUICK[i]; if(!q) return;
+  S.form.desc=q.desc;
+  if(q.category && catByName(q.category)) S.form.cat=q.category;
+  S.form.amount=q.amount?String(q.amount):'';
+  S.focusAmount=true; render();
 }
 
 function expenseFormHTML(){
@@ -990,15 +1046,17 @@ function expenseFormHTML(){
     </div>`:'';
   const needSeg = ['need','want'].map(n=>`<div class="seg-opt ${f.need===n?'on':''}" onclick="setForm('need','${n}')">${n==='need'?'🧺 Need':'✨ Want'}</div>`).join('');
   return `<div class="card">
-    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setForm('amount',this.value)"></div>
-    <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setForm('desc',this.value)"></div>
+    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setFormQ('amount',this.value)"></div>
+    <div class="fgroup"><label class="flabel">What was it?</label><input class="finput" type="text" placeholder="e.g. Aldi run" value="${esc(f.desc)}" oninput="setFormQ('desc',this.value)"></div>
     <div class="fgroup"><label class="flabel">Category</label><div class="cpill-wrap">${catPills}</div></div>
     ${payWithBlock}
     ${f.payWith==='cash'?`<div class="fgroup"><label class="flabel">Who paid?</label><div class="seg">${payerSeg}</div></div>`:`<div class="fgroup"><label class="flabel">Paid by</label><div class="finput" style="font-weight:800">${personEmoji(cardOwnerId(f.payWith))} ${esc(personName(cardOwnerId(f.payWith)))} · cardholder</div></div>`}
+    ${S.addDetails?`
     <div class="fgroup"><label class="flabel">Need or want?</label><div class="seg">${needSeg}</div></div>
     <div class="fgroup"><div class="cpill ${f.sub?'on':''}" onclick="setForm('sub',${!f.sub})" style="display:inline-flex"><span class="ci">📱</span>Subscription</div></div>
-    <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setForm('date',this.value)"></div>
-    <div style="font-size:10.5px;color:var(--txt3);font-weight:600;text-align:center;margin-bottom:10px">Need this to repeat? Add it under Settings → Recurring instead.</div>
+    <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setFormQ('date',this.value)"></div>
+    <div style="font-size:10.5px;color:var(--txt3);font-weight:600;text-align:center;margin-bottom:10px">Need this to repeat? Add it under Settings → Recurring instead.</div>`:''}
+    <button class="disclose" onclick="toggleAddDetails()">${S.addDetails?'− Fewer details':`+ More details · ${f.need==='want'?'want':'need'}${f.sub?' · subscription':''} · ${f.date===todayStr()?'today':esc(f.date)}`}</button>
     <button class="btn-primary" id="saveBtn" onclick="submitTx()">Add expense</button>
   </div>`;
 }
@@ -1007,10 +1065,10 @@ function incomeFormHTML(){
   const f=S.incomeForm;
   const srcSeg = payerOptions().map(p=>`<div class="seg-opt ${f.source===p.id?'on':''}" onclick="setIncomeForm('source','${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
   return `<div class="card">
-    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setIncomeForm('amount',this.value)"></div>
-    <div class="fgroup"><label class="flabel">Description</label><input class="finput" type="text" placeholder="e.g. Paycheck" value="${esc(f.desc)}" oninput="setIncomeForm('desc',this.value)"></div>
+    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setIncomeFormQ('amount',this.value)"></div>
+    <div class="fgroup"><label class="flabel">Description</label><input class="finput" type="text" placeholder="e.g. Paycheck" value="${esc(f.desc)}" oninput="setIncomeFormQ('desc',this.value)"></div>
     <div class="fgroup"><label class="flabel">Whose income?</label><div class="seg">${srcSeg}</div></div>
-    <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setIncomeForm('date',this.value)"></div>
+    <div class="fgroup"><label class="flabel">Date</label><input class="finput" type="date" value="${f.date}" oninput="setIncomeFormQ('date',this.value)"></div>
     <button class="btn-primary" id="incBtn" onclick="submitIncome()">Add income</button>
   </div>`;
 }
@@ -1026,7 +1084,7 @@ function moveFormHTML(){
   const ownerSeg = payerOptions().map(p=>`<div class="seg-opt ${f.owner===p.id?'on':''}" onclick="setMoveForm('owner','${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
   if(!D.accounts.length) return `<div class="card"><div class="empty"><div class="empty-ico">🏦</div><div class="empty-h">No accounts yet</div><div class="empty-s">Add one in Settings → Accounts first</div></div></div>`;
   return `<div class="card">
-    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setMoveForm('amount',this.value)"></div>
+    <div class="fgroup"><label class="flabel">Amount</label><input class="finput big" type="text" inputmode="decimal" placeholder="0.00" value="${esc(f.amount)}" oninput="setMoveFormQ('amount',this.value)"></div>
     <div class="fgroup"><label class="flabel">From</label><select class="finput" onchange="setMoveForm('from',this.value)">${acctGoalOptions(f.from,false)}</select></div>
     <div class="fgroup"><label class="flabel">To</label><select class="finput" onchange="setMoveForm('to',this.value)">${acctGoalOptions(f.to,false)}</select></div>
     <div class="fgroup"><label class="flabel">Whose money?</label><div class="seg">${ownerSeg}</div></div>
