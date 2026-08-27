@@ -521,7 +521,7 @@ const S = {
   peopleForm:null,
   moneyTab:'overview', person:'All',
   milestone:null,
-  scan:{ status:'idle', error:'', images:[], notes:'', rows:null, payer:BOTH },
+  scan:{ status:'idle', error:'', images:[], notes:'', rows:null, payer:null }, // payer resolves to the cardholder on first open
   syncStatus:'unknown', syncing:false,
 };
 
@@ -667,9 +667,32 @@ function flexTotals(){
 
 // ─── Money tab math ───────────────────────────────────────────────────────────
 function byOwner(list){ return S.person==='All'?list:list.filter(x=>(x.owner||'shared')===S.person||(x.owner||'shared')==='shared'); }
-function netWorth(){
-  const assets=spendAccounts().reduce((s,a)=>s+(+a.balance||0),0);
-  const owed=cards().reduce((s,a)=>s+(+a.balance||0),0)+D.debts.reduce((s,d)=>s+(+d.balance||0),0);
+// How much of an owned thing counts toward the person currently in view.
+// "All" counts everything once; a person counts what's theirs in full and an
+// even slice of anything marked shared — so the two individual views always
+// add back up to the household total instead of double-counting shared items.
+function ownerShare(ownerId,personId){
+  const p=personId||S.person;
+  if(p==='All') return 1;
+  const o=ownerId||'shared';
+  if(o===p) return 1;
+  if(o==='shared'||o===BOTH) return 1/Math.max(D.people.length,1);
+  return 0;
+}
+// Every liability in one list: standalone debts plus any credit card with a
+// balance. A card is real debt owned by its cardholder, and because the balance
+// is the sum of unsettled charges it grows the moment a charge is queued.
+function allDebts(){
+  const fromDebts=D.debts.map(d=>({id:d.id,name:d.name,owner:d.owner||'shared',balance:+d.balance||0,
+    startBalance:+d.startBalance||0,apr:+d.apr||0,minPayment:+d.minPayment||0,highPriority:!!d.highPriority,source:'debt'}));
+  const fromCards=cards().filter(c=>(+c.balance||0)>0).map(c=>({id:c.id,name:c.name,owner:c.owner||'shared',
+    balance:+c.balance||0,startBalance:+c.limit||0,apr:0,minPayment:0,highPriority:false,source:'card',limit:+c.limit||0}));
+  return fromDebts.concat(fromCards);
+}
+function netWorth(personId){
+  const p=personId||S.person;
+  const assets=spendAccounts().reduce((s,a)=>s+(+a.balance||0)*ownerShare(a.owner,p),0);
+  const owed=allDebts().reduce((s,d)=>s+d.balance*ownerShare(d.owner,p),0);
   return {assets,owed,net:assets-owed};
 }
 function snapshotNetWorth(){
@@ -1069,7 +1092,7 @@ function settleConfirm(amount,aAhead){
 }
 
 // ─── SCAN STATEMENT (bring-your-own Claude API key, client-side only) ────────
-function resetScan(){ S.scan={status:'idle',error:'',images:[],notes:'',rows:null,payer:S.scan.payer||BOTH}; }
+function resetScan(){ S.scan={status:'idle',error:'',images:[],notes:'',rows:null,payer:S.scan.payer||cardholderId()}; }
 function cancelScan(){ resetScan(); render(); }
 
 function downscaleImageFile(file){
@@ -1233,6 +1256,7 @@ function setScanRowField(id,key,val){
   if(key==='kind') r.include = (val!=='skip');
   render();
 }
+function scanPayer(){ return S.scan.payer||cardholderId(); } // defaults to the cardholder, not a 50/50 split
 function setScanPayer(p){ S.scan.payer=p; render(); }
 
 function scanHTML(){
@@ -1265,7 +1289,7 @@ function scanResultsHTML(){
   const skipped=rows.filter(r=>r.kind==='skip').length;
   const included=rows.filter(r=>r.include).length;
   const dupCount=rows.filter(r=>r.duplicate).length;
-  const ownerSeg=payerOptions().map(p=>`<div class="seg-opt ${S.scan.payer===p.id?'on':''}" onclick="setScanPayer('${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
+  const ownerSeg=payerOptions().map(p=>`<div class="seg-opt ${scanPayer()===p.id?'on':''}" onclick="setScanPayer('${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('');
   const rowHTML=r=>`<div class="tx" style="cursor:default;align-items:flex-start;opacity:${r.kind==='skip'?'.55':'1'}">
     <div class="cpill ${r.include?'on':''}" style="padding:0;width:26px;height:26px;justify-content:center;flex-shrink:0;margin-top:2px" onclick="toggleScanRow(${r.id})">${r.include?'✓':''}</div>
     <div class="tx-body">
@@ -1306,7 +1330,7 @@ function importScanRows(){
       D.categories.push(c); commit('categories');
       syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:0,kind:'flex'});
     }
-    const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:S.scan.payer,amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
+    const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:scanPayer(),amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
     syncOp(r.kind==='income'?'addIncome':'addTransaction', r.kind==='income'?toServerIncomeParams(tx):toServerTxParams(tx));
   });
   showToast(`✅ Imported ${rows.length} transaction${rows.length!==1?'s':''}`);
@@ -1402,23 +1426,55 @@ function moneyHTML(){
       <div class="util-lbls"><span>${Math.round(pct)}% used${pct>=30?' · aim under 30%':''}</span><span>${used>0?'tap to pay off →':'paid off 🎉'}</span></div></div>
     </div>`;
   }).join('');
+  // Whose debts are these, itemized — the part the old view got wrong by
+  // showing every person the household total.
+  const myDebts=allDebts().map(d=>({...d, share:ownerShare(d.owner,S.person)})).filter(d=>d.share>0 && d.balance>0)
+    .sort((a,b)=>b.balance*b.share-a.balance*a.share);
+  const debtRows=myDebts.map(d=>{
+    const amt=d.balance*d.share;
+    const sharedNote=d.share<1?` · your ${Math.round(d.share*100)}% of ${f0(d.balance)}`:'';
+    return `<div class="acct" style="cursor:default">
+      <div class="acct-ico" style="background:var(--rose-soft)">${d.source==='card'?'💳':'🎓'}</div>
+      <div class="acct-body"><div class="acct-name">${esc(d.name)}</div>
+        <div class="acct-meta">${esc(ownerLabel(d.owner))}${sharedNote}${d.source==='card'?' · grows as you charge':d.minPayment>0?` · ${f0(d.minPayment)}/mo min`:''}</div></div>
+      <div><div class="acct-bal" style="color:var(--rose)">${f$(amt)}</div></div>
+    </div>`;
+  }).join('');
+
+  // Side-by-side so "who is carrying what" is answerable without toggling
+  const perPerson=D.people.map(p=>{
+    const n=netWorth(p.id);
+    return `<div class="person-card" onclick="setPerson('${p.id}')" style="cursor:pointer;${S.person===p.id?'border-color:var(--pink);box-shadow:0 0 0 2px var(--pink-glow)':''}">
+      <div class="pc-name">${p.emoji} ${esc(p.name)}</div>
+      <div class="pc-spent" style="color:${n.net>=0?'var(--mint)':'var(--rose)'};font-size:17px">${n.net<0?'−':''}${f0(Math.abs(n.net))}</div>
+      <div class="pc-remaining" style="color:var(--txt3)">${f0(n.assets)} saved · ${f0(n.owed)} owed</div>
+    </div>`;
+  }).join('');
+
+  const label=S.person==='All'?'Our':ownerLabel(S.person)+"'s";
   return subtabs+personToggle+`
     <div class="total-card" style="background:linear-gradient(135deg,var(--sky-soft),var(--mint-soft))">
-      <div class="total-eyebrow">${S.person==='All'?'Our':ownerLabel(S.person)+"'s"} net worth · right now</div>
-      <div class="total-amount" style="color:${nw.net>=0?'var(--txt)':'var(--rose)'}">${nw.net<0?'-':''}${f$(Math.abs(nw.net))}</div>
+      <div class="total-eyebrow">${label} net worth · right now</div>
+      <div class="total-amount" style="color:${nw.net>=0?'var(--txt)':'var(--rose)'}">${nw.net<0?'−':''}${f$(Math.abs(nw.net))}</div>
       <div class="total-sub">${f0(nw.assets)} in accounts − ${f0(nw.owed)} owed 🐾</div>
     </div>
 
-    ${sankeyHTML()}
+    ${S.person==='All'?`<div class="person-cards">${perPerson}</div>`:''}
 
     ${cardBlock}
 
     <div class="card">
-      <div class="card-title-row"><span class="card-title">🏦 Accounts</span><button class="card-toggle" onclick="goSettings('accounts')">⚙️ Manage</button></div>
-      ${accts.length?accts.map(acctRow).join(''):`<div class="empty"><div class="empty-ico">🏦</div><div class="empty-h">No accounts yet</div><div class="empty-s">Add checking, savings, investments in Settings</div></div>`}
+      <div class="card-title-row"><span class="card-title">🏦 ${label} accounts</span><button class="card-toggle" onclick="goSettings('accounts')">⚙️ Manage</button></div>
+      ${accts.length?accts.map(acctRow).join(''):`<div class="empty"><div class="empty-ico">🏦</div><div class="empty-h">No accounts here</div><div class="empty-s">${S.person==='All'?'Add checking, savings, investments in Settings':'Nothing assigned to '+ownerLabel(S.person)+' yet'}</div></div>`}
     </div>
 
-    <div style="font-size:11px;color:var(--txt3);font-weight:600;text-align:center;margin:4px 0 2px">Debts & savings goals live in the 🎯 Goals tab</div>
+    <div class="card">
+      <div class="card-title-row"><span class="card-title">💳 ${label} debt</span><span style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--rose)">${f0(nw.owed)}</span></div>
+      ${debtRows||`<div class="empty" style="padding:20px"><div class="empty-ico">🕊️</div><div class="empty-h">No debt here</div><div class="empty-s">Nothing owed under this view</div></div>`}
+      <div style="font-size:10.5px;color:var(--txt3);font-weight:600;margin-top:8px">Assign an owner to each debt in the 🎯 Goals tab. Card balances count as their cardholder's debt automatically.</div>
+    </div>
+
+    ${sankeyHTML()}
   `;
 }
 
@@ -1504,8 +1560,9 @@ function debtFormHTML(){
   </div>`;
 }
 function debtRowHTML(d){
+  const own=ownerLabel(d.owner);
   return `<div class="debt">
-    <div class="debt-row"><div class="debt-name">${esc(d.name)}${d.highPriority?'<span class="debt-pri">priority</span>':''}</div><div class="debt-bal">${d.balance<=0?'—':f$(d.balance)}</div></div>
+    <div class="debt-row"><div class="debt-name">${esc(d.name)} <span style="font-weight:600;color:var(--txt3);font-size:11px">· ${esc(own)}</span>${d.highPriority?'<span class="debt-pri">priority</span>':''}</div><div class="debt-bal">${d.balance<=0?'—':f$(d.balance)}</div></div>
     ${debtProjHTML(d)}
     <div class="debt-actions">
       ${d.balance>0?`<button onclick="openDebtPaymentModal('${d.id}')">💸 Log payment</button>`:''}
@@ -1550,8 +1607,8 @@ function goalsHTML(){
   const next=strategyNext();
   const allZeroApr=debts.filter(d=>d.balance>0).every(d=>!(+d.apr));
   const cardDebtRow=c=>`<div class="debt">
-    <div class="debt-row"><div class="debt-name">💳 ${esc(c.name)}</div><div class="debt-bal">${f$(c.balance)}</div></div>
-    <div class="debt-proj">Credit card balance · <b onclick="openPayCardModal('${c.id}')" style="color:var(--sky);cursor:pointer">tap to pay off</b></div>
+    <div class="debt-row"><div class="debt-name">💳 ${esc(c.name)} <span style="font-weight:600;color:var(--txt3);font-size:11px">· ${esc(ownerLabel(c.owner))}</span></div><div class="debt-bal">${f$(c.balance)}</div></div>
+    <div class="debt-proj">${(+c.limit||0)>0?`${Math.round((+c.balance||0)/(+c.limit)*100)}% of ${f0(c.limit)} limit · grows as you charge · `:'Grows as you charge · '}<b onclick="openPayCardModal('${c.id}')" style="color:var(--sky);cursor:pointer">tap to pay off</b></div>
   </div>`;
   const hasDebt=debts.length||cardAccts.length;
   const personToggle=`<div class="person-toggle">${[{id:'All',name:'All',emoji:'👫'},...D.people].map(p=>`<div class="seg-opt ${S.person===p.id?'on':''}" onclick="setPerson('${p.id}')">${p.emoji} ${esc(p.name)}</div>`).join('')}</div>`;

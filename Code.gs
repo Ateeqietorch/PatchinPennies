@@ -256,15 +256,28 @@ function setup(){
 // script lock so two devices hitting the API simultaneously can't double-run it.
 function maybeMigrate_(){
   const props=PropertiesService.getScriptProperties();
-  if(props.getProperty("mig_2026_08_cleanup")) return;
+  const pending=MIGRATIONS_.filter(m=>!props.getProperty(m.key));
+  if(!pending.length) return;
   const lock=LockService.getScriptLock();
-  if(!lock.tryLock(20000)) return; // someone else is running it; they'll finish
+  if(!lock.tryLock(20000)) return; // someone else is running them; they'll finish
   try{
-    if(props.getProperty("mig_2026_08_cleanup")) return;
-    mig_2026_08_cleanup_();
-    props.setProperty("mig_2026_08_cleanup", todayStr());
+    MIGRATIONS_.forEach(m=>{
+      if(props.getProperty(m.key)) return;
+      m.run();
+      props.setProperty(m.key, todayStr());
+    });
   } finally { lock.releaseLock(); }
 }
+var MIGRATIONS_=[
+  {key:"mig_2026_08_cleanup", run:function(){ mig_2026_08_cleanup_(); }},
+  // Statement-scan rows imported before the client defaulted to the cardholder
+  // are still sitting on "Both". Re-run the reattribution so anything scanned
+  // between the first migration and this deploy gets corrected too.
+  {key:"mig_2026_08_rescan_owner", run:function(){
+    reattributeByNote_(sheet(TX_SHEET),"Imported from statement scan","PaidBy","Ateeq");
+    reattributeByNote_(sheet(INCOME_SHEET),"Imported from statement scan","Source","Ateeq");
+  }}
+];
 
 // Cleanup agreed with Ateeq on 2026-08-27:
 //  - $900 Zelle to Celeste was his half of rent -> already covered by the $1800
