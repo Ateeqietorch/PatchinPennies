@@ -505,7 +505,12 @@ function fromServerBill(b){ return { id:b.ID, name:b.Description, kind:'bill', c
   frequency:b.Frequency||'monthly', dayOfMonth:b.DayOfMonth||1, destType:'', destId:'', flowType:'', active:b.Active!==false, lastRun:b.LastRun||'' }; }
 function fromServerContrib(c){ return { id:c.ID, date:c.Date, flowType:c.FlowType==='divest'?'divest':'invest', amount:+c.Amount||0,
   accountId:c.AccountID||'', goalId:c.GoalID||'', payer:fromServerOwner(c.Owner), notes:c.Notes||'', source:c.Source||'manual' }; }
-function fromServerCharge(c){ return { id:c.ID, accountId:c.AccountID, date:c.Date, desc:c.Description, category:c.Category, payer:fromServerPerson(c.PaidBy), amount:+c.Amount||0, settled:!!c.Settled, notes:'' }; }
+// getCardCharges normalises Settled to a real boolean, but the sheet itself
+// stores "yes"/"no" - and !!"no" is true, which would silently mark every
+// outstanding charge as paid. Accept both shapes so reading the sheet directly
+// can never flip a queued charge into a settled one.
+function chargeSettled(v){ return v===true || String(v==null?'':v).trim().toLowerCase()==='yes'; }
+function fromServerCharge(c){ return { id:c.ID, accountId:c.AccountID, date:c.Date, desc:c.Description, category:c.Category, payer:fromServerPerson(c.PaidBy), amount:+c.Amount||0, settled:chargeSettled(c.Settled), notes:'' }; }
 function fromServerCat(c){ return { id:c.ID, name:c.Name, icon:c.Icon||'📦', color:c.Color||'#f9a8d4', budget:+c.Budget||0, kind:c.Kind==='bill'?'bill':'flex' }; }
 
 function applyServerData(data){

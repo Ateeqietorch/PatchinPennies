@@ -384,6 +384,29 @@ var MIGRATIONS_=[
     // balance, so anything Ateeq paid beyond it is charges the app never saw.
     payCard({accountId:"7a46e298-f0ed-4746-966d-2413dc6cf460",amount:990});
   }},
+  // Ateeq's checking account never existed in the app. Every account was a
+  // savings, retirement, investment or card - nothing represented the account he
+  // actually spends from - so cash could never be reconciled against reality.
+  // Balances below are the ones he confirmed on 2026-08-31.
+  {key:"mig_2026_09_checking_and_balances", run:function(){
+    const CHK="a7e0c4ec-0000-4000-8000-c4ec00000001";
+    if(getCell(sheet(ACCT_SHEET),CHK,"ID")===null)
+      addAccount({id:CHK,name:"Ateeq's Checking",owner:"Ateeq",type:"checking",balance:16.64,apy:0,limit:0});
+    // reconcileAccount rather than updateAccount: it records the correction as a
+    // Reconciles row, so the drift is auditable instead of silently overwritten.
+    reconcileAccount({id:"b3efd6ff-a0ca-4eef-9433-4e0f7c95469b",balance:350});
+    // The $5K card claimed 210 with only 139.77 of charges queued against it; the
+    // real balance is 319. Queue the 179.23 difference as an openly unidentified
+    // charge so the queue reconciles to the balance and a payoff settles the right
+    // amount, then set the balance to the truth (chargeCard raises it as it goes).
+    const K5="c5000a7e-0000-4000-8000-a7e59c5000ca";
+    const GAP="a7e0c4ec-0000-4000-8000-c4ec00000002";
+    if(getCell(sheet(CARDCHG_SHEET),GAP,"ID")===null)
+      chargeCard({id:GAP,accountId:K5,date:"2026-08-31",
+                  description:"Unidentified charges - scan the card statement to itemise",
+                  category:"Personal/Misc",paidBy:"Ateeq",amount:179.23,notes:""});
+    updateAccount({id:K5,balance:319});
+  }},
   {key:"mig_2026_08_add_5k_card", run:function(){
     const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
     if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;
