@@ -368,6 +368,22 @@ var MIGRATIONS_=[
     addTransaction({id:"a1e00013",date:"2026-08-24",description:"Instacart (Klarna installment)",
                     category:"Groceries",paidBy:"Ateeq",amount:29.16,txType:"One-time",need:"need"});
   }},
+  // Ateeq identified the two unconfirmed moves, and they land differently.
+  {key:"mig_2026_09_reclassify_moves", run:function(){
+    // $850 bought a PC. It came out of savings, but the funding source does not
+    // change what happened: money left and a thing came back. That is spending.
+    updateRowById(sheet(TX_SHEET),"a1e00023",
+      {Description:"Gaming PC (funded from savings)",Category:"Shopping",Notes:"",Need:"want"});
+    // $990 paid down the credit card. A card payment is not consumption - in
+    // this model the spending lands when the queued charges settle, which the
+    // payCard call below does. Double-counting it would bill the same purchases
+    // once as charges and again as the payment.
+    updateRowById(sheet(TX_SHEET),"a1e00021",
+      {Description:"Credit card payment",Notes:"TRANSFER:cardpay"});
+    // Settle what the card actually has queued. payCard caps at the tracked
+    // balance, so anything Ateeq paid beyond it is charges the app never saw.
+    payCard({accountId:"7a46e298-f0ed-4746-966d-2413dc6cf460",amount:990});
+  }},
   {key:"mig_2026_08_add_5k_card", run:function(){
     const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
     if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;

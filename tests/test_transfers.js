@@ -104,12 +104,45 @@ log('a transfer row is labelled as a transfer in the list',()=>{
   w.clearAct();
 });
 log('no cash-out card when nothing moved',()=>{
-  const keep=w.eval('JSON.stringify(D.ledger)');
-  w.eval("D.ledger=[];D.transactions=[];"); 
+  const keepL=w.eval('JSON.stringify(D.ledger)'), keepT=w.eval('JSON.stringify(D.transactions)');
+  w.eval("D.ledger=[];D.transactions=[];");
   if(w.eval("cashOut('ateeq','month').total")!==0) throw new Error('should be zero');
   if(w.eval('cashOutHTML()')!=='') throw new Error('should render nothing');
-  w.eval("D.ledger="+keep+";");
+  w.eval("D.ledger="+keepL+";D.transactions="+keepT+";");   // restore BOTH, or later cases see an empty ledger
 });
+log('a PC bought from savings is spending, not a transfer',()=>{
+  // Funding source does not decide the category. Money left and a thing came
+  // back, so it counts - unlike moving money INTO savings, which does not.
+  w.eval(`D.transactions.push(fromServerTx({ID:'pc',Date:'${d(21)}',Description:'Gaming PC (funded from savings)',Category:'Dining Out',PaidBy:'Ateeq',Amount:850,TxType:'One-time',Notes:''}))`);
+  const t=w.eval("D.transactions.find(t=>t.id==='pc')");
+  if(t.kind!=='expense') throw new Error('kind = '+t.kind);
+  if(!w.eval("catTotals()['Dining Out']")) throw new Error('did not reach a category');
+  w.eval("D.transactions=D.transactions.filter(t=>t.id!=='pc')");
+});
+log('a card payment is a transfer, and shows in its own row',()=>{
+  w.eval(`D.transactions.push(fromServerTx({ID:'cp',Date:'${d(28)}',Description:'Credit card payment',Category:'Personal/Misc',PaidBy:'Ateeq',Amount:990,TxType:'One-time',Notes:'TRANSFER:cardpay'}));D.ledger=D.transactions.slice();`);
+  const t=w.eval("D.transactions.find(t=>t.id==='cp')");
+  if(t.kind!=='transfer'||t.transferKind!=='cardpay') throw new Error('kind='+t.kind+' sub='+t.transferKind);
+  if(R(w.eval("cashOut('ateeq','month').cardpay"))!==990) throw new Error('cardpay bucket wrong');
+  w.openPerson('ateeq'); w.setPV('period','month');
+  if(!w.eval('cashOutHTML()').includes('Paid off the card')) throw new Error('no card row on the card');
+  if(R(w.eval('totalExpenses()'))!==1913.13) throw new Error('card payment leaked into spending: '+w.eval('totalExpenses()'));
+});
+log('overpaying a card reports the untracked difference instead of eating it',()=>{
+  w.eval(`D.accounts=[{id:'card1',name:'Credit Card',owner:'ateeq',type:'credit',balance:374.04,apy:0,limit:1000,lastReconciled:''}];
+          D.cardCharges=[{id:'c1',accountId:'card1',date:'${d(13)}',desc:'Coffee',category:'Dining Out',payer:'ateeq',amount:374.04,settled:false,notes:''}];`);
+  const res=w.eval("payCard('card1',990,'')");
+  if(R(res.paid)!==374.04) throw new Error('paid = '+res.paid);
+  if(R(res.excess)!==615.96) throw new Error('excess should be 615.96, got '+res.excess);
+  if(R(w.eval("acctById('card1').balance"))!==0) throw new Error('card not cleared');
+  if(!w.eval("D.transactions.some(t=>t.desc==='Coffee'&&t.cardSettled)")) throw new Error('charge did not become spending');
+});
+log('paying exactly what is owed reports no excess',()=>{
+  w.eval(`D.accounts=[{id:'c2',name:'Card2',owner:'ateeq',type:'credit',balance:100,apy:0,limit:500,lastReconciled:''}];
+          D.cardCharges=[{id:'x1',accountId:'c2',date:'${d(13)}',desc:'Thing',category:'Dining Out',payer:'ateeq',amount:100,settled:false,notes:''}];`);
+  if(w.eval("payCard('c2',100,'').excess")!==0) throw new Error('false positive on an exact payment');
+});
+
 ['home','money','goals','recap','settings','person'].forEach(v=>log('regression go('+v+')',()=>w.go(v)));
 console.log('\n--- window errors ---'); errors.forEach(e=>console.log(e));
 console.log('TOTAL ERRORS:',errors.length);

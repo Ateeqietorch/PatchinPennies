@@ -692,7 +692,11 @@ function payCard(accountId,amount,fromAccountId){
     }
   }
   commit('accounts'); commit('cardCharges');
-  return {success:true, paid:applied, newBalance:card.balance, settled:settledCount};
+  // Math.min above caps the payment at the tracked balance, so an overpayment
+  // used to vanish without a word. If you paid more than the app thinks you
+  // owed, the difference is real charges that were never logged - say so.
+  const excess=Math.round(((+amount||0)-applied)*100)/100;
+  return {success:true, paid:applied, newBalance:card.balance, settled:settledCount, excess:excess>0.009?excess:0};
 }
 
 // ─── Plan ("every dollar has a job") ─────────────────────────────────────────
@@ -982,8 +986,9 @@ function cashOut(personId,period){
   const rows=ledgerRows().filter(t=>inRange(t)&&mine(t));
   const spent=rows.filter(t=>t.kind==='expense').reduce((s,t)=>s+t.amount*share(t),0);
   const tr=k=>rows.filter(t=>t.kind==='transfer'&&t.transferKind===k).reduce((s,t)=>s+t.amount*share(t),0);
-  const saved=tr('savings'), settled=tr('settle'), unknown=tr('unknown')+tr('external');
-  return {spent,saved,settled,unknown,total:spent+saved+settled+unknown};
+  const saved=tr('savings'), settled=tr('settle'), cardpay=tr('cardpay'),
+        unknown=tr('unknown')+tr('external');
+  return {spent,saved,settled,cardpay,unknown,total:spent+saved+settled+cardpay+unknown};
 }
 function cashOutHTML(){
   const c=cashOut(S.pv.id,S.pv.period);
@@ -997,6 +1002,7 @@ function cashOutHTML(){
     ${row('Spent',c.spent,'Gone — bought something','var(--peach)')}
     ${row('Moved to savings',c.saved,'Still yours, different account','var(--mint)')}
     ${row('Settled with '+personName(D.people.filter(p=>p.id!==S.pv.id).map(p=>p.id)[0]),c.settled,'Your half of a shared bill already counted above','var(--sky)')}
+    ${row('Paid off the card',c.cardpay,'The purchases behind it count on their own charge dates','var(--sky)')}
     ${row('Destination unconfirmed',c.unknown,'Tell me where these went and I will reclassify','var(--txt2)')}
     <div class="co-foot">Only <b>${f0(c.spent)}</b> of this is spending. The rest left your checking account but is either still yours or settles a bill already counted, so counting it again would double it.</div>
   </div>`;
@@ -2753,7 +2759,12 @@ function submitPayCard(){
   const res=payCard(m.accountId,amt,m.fromId||'');
   syncOp('payCard',{accountId:m.accountId,amount:amt,fromAccountId:m.fromId||''});
   closeModal();
-  if(res && res.success) showToast(`💳 Paid ${f0(res.paid)} · ${res.settled} charge${res.settled!==1?'s':''} now counted`);
+  if(res && res.success){
+    showToast(`💳 Paid ${f0(res.paid)} · ${res.settled} charge${res.settled!==1?'s':''} now counted`);
+    // Paying more than the tracked balance is the app telling on itself: those
+    // dollars settled real purchases that were never logged.
+    if(res.excess) setTimeout(()=>showToast(`⚠️ ${f0(res.excess)} more than this card was tracking — scan the statement so those charges get counted`),2400);
+  }
 }
 
 function openTxDetail(id){
