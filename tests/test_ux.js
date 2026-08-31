@@ -1,4 +1,4 @@
-const fs=require('fs');const {JSDOM}=require('jsdom');
+const fs=require('fs');const {JSDOM}=require('jsdom');const ready=require('./boot');
 const html=fs.readFileSync(__dirname+'/../index.html','utf8');
 const CATS=[{ID:'c1',Name:'Groceries',Icon:'🛒',Color:'#93c5fd',Budget:600,Kind:'flex'},
             {ID:'c2',Name:'Dining Out',Icon:'🍜',Color:'#fca5a5',Budget:200,Kind:'flex'}];
@@ -14,7 +14,7 @@ function serverGetAll(){return{transactions:TX,goals:[],income:[],payments:[],fl
 
 (async()=>{
 const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',url:'http://localhost/'});
-const w=dom.window; await new Promise(r=>setTimeout(r,400));
+const w=dom.window; await ready(dom.window);
 const errors=[];
 w.addEventListener('error',e=>errors.push(e.error?(e.error.stack||String(e.error)):e.message));
 const log=(l,fn)=>{try{fn();console.log('OK   ',l)}catch(e){console.log('FAIL ',l,'->',e.message);errors.push(l+': '+e.stack)}};

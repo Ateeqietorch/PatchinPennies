@@ -1,4 +1,4 @@
-const fs=require('fs');const {JSDOM}=require('jsdom');
+const fs=require('fs');const {JSDOM}=require('jsdom');const ready=require('./boot');
 const html=fs.readFileSync(__dirname+'/../index.html','utf8');
 const N=new Date(), M=N.getMonth()+1, Y=N.getFullYear();
 const p2=n=>String(n).padStart(2,'0');
@@ -22,7 +22,7 @@ const LEDGER={transactions:THIS.concat(OLD),income:[{ID:'i1',Date:d(0,1),Descrip
                                                     {ID:'i2',Date:d(2,1),Description:'LPP',Source:'Celeste',Amount:1848}]};
 (async()=>{
 const dom=new JSDOM(html,{runScripts:'dangerously',resources:'usable',url:'http://localhost/'});
-const w=dom.window; await new Promise(r=>setTimeout(r,400));
+const w=dom.window; await ready(dom.window);
 const errors=[]; w.addEventListener('error',e=>errors.push(e.error?(e.error.stack||String(e.error)):e.message));
 const log=(l,fn)=>{try{fn();console.log('OK   ',l)}catch(e){console.log('FAIL ',l,'->',e.message);errors.push(l+': '+e.stack)}};
 const aLog=async(l,fn)=>{try{await fn();console.log('OK   ',l)}catch(e){console.log('FAIL ',l,'->',e.message);errors.push(l+': '+e.stack)}};

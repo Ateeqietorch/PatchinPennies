@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { JSDOM } = require('jsdom');
+const { JSDOM } = require('jsdom');const ready=require('./boot');
 const html = fs.readFileSync(__dirname + '/../index.html', 'utf8');
 
 function fakeSSEBody(events) {
@@ -21,7 +21,7 @@ function fakeSSEBody(events) {
 async function run() {
   const dom = new JSDOM(html, { runScripts: 'dangerously', resources: 'usable', url: 'http://localhost/' });
   const w = dom.window;
-  await new Promise(r => setTimeout(r, 400));
+  await ready(dom.window);
   const errors = [];
   w.addEventListener('error', (e) => errors.push(e.error ? (e.error.stack || String(e.error)) : e.message));
   const log = (label, fn) => { try { fn(); console.log('OK   ', label); } catch (e) { console.log('FAIL ', label, '->', e.message); errors.push(label + ': ' + e.stack); } };

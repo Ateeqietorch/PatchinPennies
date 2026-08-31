@@ -357,6 +357,17 @@ var MIGRATIONS_=[
     if(getCell(sheet(INCOME_SHEET),"a1e00030","ID")===null)
       addIncome({id:"a1e00030",date:"2026-08-31",description:"Gusto Payroll",source:"Ateeq",amount:1965.18});
   }},
+  // Ateeq confirmed the 8/24 Instacart $29.16 is a later Klarna installment of
+  // the same order as the 8/04 one - a separate payment, not a duplicate row.
+  // The ledger is cash-basis (the 8/04 row is the installment, not the full
+  // order), so each payment counts as it leaves the account.
+  // Kept as its own migration because the statement import above may already
+  // have run on a device by the time this deploys.
+  {key:"mig_2026_08_31_instacart", run:function(){
+    if(getCell(sheet(TX_SHEET),"a1e00013","ID")!==null) return;
+    addTransaction({id:"a1e00013",date:"2026-08-24",description:"Instacart (Klarna installment)",
+                    category:"Groceries",paidBy:"Ateeq",amount:29.16,txType:"One-time",need:"need"});
+  }},
   {key:"mig_2026_08_add_5k_card", run:function(){
     const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
     if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;
