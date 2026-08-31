@@ -148,15 +148,16 @@ log('a running count and totals are shown for what is on screen',()=>{
 });
 
 console.log('\n── Attention ──');
-log('the unpaid debt minimums are surfaced as the top item',()=>{
+log('the never-paid debt is surfaced as the top item',()=>{
+  // This fixture has debts and an empty DebtPayments sheet, which is the real
+  // situation: not a missed month, a balance nobody has ever paid.
   const items=w.eval('attentionItems()');
-  if(dayNow<5){ console.log('       (day '+dayNow+': grace period, checking suppression instead)');
-    if(items.some(i=>i.id==='debt-mins')) throw new Error('should stay quiet before the 5th'); return; }
-  const i=items.find(x=>x.id==='debt-mins');
-  if(!i) throw new Error('missed $600 of committed minimums with nothing logged');
-  if(items[0].id!=='debt-mins') throw new Error('not ranked first, got '+items[0].id);
-  if(!i.title.includes('600')) throw new Error('title should name the amount: '+i.title);
+  const i=items.find(x=>x.id==='debt-never-paid');
+  if(!i) throw new Error('missed $4,026.77 of debt with no payment ever logged');
+  if(items[0].id!=='debt-never-paid') throw new Error('not ranked first, got '+items[0].id);
+  if(!i.title.includes('4,027')) throw new Error('title should name the amount owed: '+i.title);
   if(!i.sub.includes('Celeste')) throw new Error('should name whose debt it is');
+  if(items.some(x=>x.id==='debt-mins')) throw new Error('the this-month item must not fire as well');
 });
 log('over-budget categories are flagged worst-first with real numbers',()=>{
   const o=ids().filter(x=>x.startsWith('over-'));

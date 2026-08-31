@@ -170,6 +170,14 @@ textarea.finput{resize:none;min-height:60px}
 .attn-clear{display:flex;align-items:center;gap:11px}
 .attn-clear-h{font-size:13px;font-weight:800;color:var(--txt)}
 .attn-clear-s{font-size:11px;font-weight:600;color:var(--txt2);margin-top:1px}
+.pv-head{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pv-back{background:var(--card);border:1.5px solid var(--border);border-radius:11px;width:34px;height:34px;font-size:19px;font-weight:800;color:var(--txt2);cursor:pointer;line-height:1}
+.pv-who{font-size:19px;font-weight:900;color:var(--txt)}
+.pv-dds{display:flex;gap:6px;margin-bottom:11px;flex-wrap:wrap}
+.pv-dd{flex:1 1 30%;min-width:104px;padding:9px 8px;font-size:12px}
+.pv-note{font-size:11px;font-weight:600;color:var(--txt2);text-align:center;margin-top:9px}
+.pv-cat{margin-bottom:11px;cursor:pointer}
+.debt-note{background:var(--peach-soft);border-radius:11px;padding:9px 11px;font-size:11.5px;font-weight:600;color:var(--txt);line-height:1.45;margin-bottom:10px}
 
 /* Goals */
 .goal-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:15px;margin-bottom:11px;box-shadow:var(--shadow)}
@@ -315,7 +323,7 @@ const LS = {
   recurring:'pp:recurring', goals:'pp:goals', debts:'pp:debts',
   debtPayments:'pp:debtPayments', contributions:'pp:contributions',
   cardCharges:'pp:cardCharges', transactions:'pp:transactions', settings:'pp:settings',
-  insights:'pp:insights'
+  insights:'pp:insights', ledger:'pp:ledger'
 };
 const BOTH='both';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -372,6 +380,7 @@ function initData(){
   D.transactions = loadKey(LS.transactions, []);
   D.settings = loadKey(LS.settings, null) || seedSettings();
   D.insights = loadKey(LS.insights, null) || {prevCategoryTotals:{}, monthly:[]};
+  D.ledger = loadKey(LS.ledger, []);   // every month, for the per-person views
   Object.keys(LS).forEach(k=>commit(k));
 }
 
@@ -469,7 +478,7 @@ function fromServerIncome(i){
 }
 function toServerIncomeParams(t){ return { id:t.id, date:t.date, description:t.desc, source:toServerPerson(t.payer), amount:t.amount, notes:t.notes||'' }; }
 function fromServerAcct(a){ return { id:a.ID, name:a.Name, owner:fromServerOwner(a.Owner), type:a.Type||'checking', balance:+a.Balance||0, apy:+a.APY||0, lastReconciled:a.LastReconciled||'', limit:+a.Limit||0 }; }
-function fromServerDebt(d){ return { id:d.ID, name:d.Name, owner:fromServerOwner(d.Owner), startBalance:+d.StartBalance||0, balance:+d.Balance||0, apr:+d.APR||0, minPayment:+d.MinPayment||0, highPriority:!!d.HighPriority, created:'' }; }
+function fromServerDebt(d){ return { id:d.ID, name:d.Name, owner:fromServerOwner(d.Owner), startBalance:+d.StartBalance||0, balance:+d.Balance||0, apr:+d.APR||0, minPayment:+d.MinPayment||0, highPriority:!!d.HighPriority, created:d.Created||'' }; }
 function fromServerDebtPayment(p){ return { id:p.ID, debtId:p.DebtID, date:p.Date, amount:+p.Amount||0, payer:fromServerPerson(p.PaidBy), notes:'' }; }
 function fromServerGoal(g){ return { id:g.ID, name:g.Name, target:+g.Target||0, saved:+g.Saved||0, targetDate:g.TargetDate||'', notes:g.Notes||'', created:'' }; }
 function fromServerFlow(f){ return { id:f.ID, name:f.Name, kind:'transfer', category:'', amount:+f.Amount||0, payer:fromServerOwner(f.Owner),
@@ -547,6 +556,7 @@ const S = {
   peopleForm:null,
   moneyTab:'overview', person:'All', attentionAll:false,
   act:{ q:'', cat:'', kind:'all' }, // Activity view search + filters
+  pv:{ id:null, period:'3mo', cat:'', sort:'amount-desc', loading:false },
   milestone:null,
   scan:{ status:'idle', error:'', images:[], notes:'', rows:null, payer:null }, // payer resolves to the cardholder on first open
   syncStatus:'unknown', syncing:false,
@@ -692,6 +702,42 @@ function flexTotals(){
   return {budget,spent,left:budget-spent};
 }
 
+// ─── Whole-history ledger ────────────────────────────────────────────────────
+// The app normally holds one month. The per-person view asks for "last 3 months"
+// and "this year", so it pulls every row once and caches it. Offline it falls
+// back to the month already in memory rather than showing an empty screen.
+async function loadLedger(force){
+  if(D.ledger.length && !force) return D.ledger;
+  S.pv.loading=true;
+  try{
+    const data=await apiCall('getLedger',{});
+    D.ledger=[].concat((data.transactions||[]).map(fromServerTx),(data.income||[]).map(fromServerIncome));
+    commit('ledger');
+  }catch(e){ /* keep whatever is cached; ledgerRows() degrades to this month */ }
+  S.pv.loading=false; render();
+  return D.ledger;
+}
+function ledgerRows(){ return D.ledger.length?D.ledger:D.transactions; }
+
+const PERIODS=[['month','This month'],['last','Last month'],['3mo','Last 3 months'],
+               ['6mo','Last 6 months'],['ytd','This year'],['all','All time']];
+const SORTS=[['amount-desc','Biggest first'],['amount-asc','Smallest first'],
+             ['date-desc','Newest first'],['date-asc','Oldest first'],['cat','By category']];
+function periodRange(p){
+  const n=new Date(), y=n.getFullYear(), m=n.getMonth();
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const first=(yy,mm)=>iso(new Date(yy,mm,1));
+  const lastDay=(yy,mm)=>iso(new Date(yy,mm+1,0));
+  if(p==='month')  return {from:first(y,m),        to:lastDay(y,m)};
+  if(p==='last')   return {from:first(y,m-1),      to:lastDay(y,m-1)};
+  if(p==='3mo')    return {from:first(y,m-2),      to:lastDay(y,m)};
+  if(p==='6mo')    return {from:first(y,m-5),      to:lastDay(y,m)};
+  if(p==='ytd')    return {from:first(y,0),        to:lastDay(y,m)};
+  return {from:'0000-01-01', to:'9999-12-31'};
+}
+function periodMonths(p){ return p==='month'?1:p==='last'?1:p==='3mo'?3:p==='6mo'?6:
+  p==='ytd'?(new Date().getMonth()+1):Math.max(new Set(ledgerRows().map(t=>String(t.date).slice(0,7))).size,1); }
+
 // ─── What needs your attention ───────────────────────────────────────────────
 // One prioritised list, doing the job an onboarding wizard and a nag system
 // would each do separately. Setup gaps ("no accounts yet") and live problems
@@ -722,18 +768,35 @@ function attentionItems(){
     action:"goSettings('recurring')", cta:'Add recurring'});
 
   // ── Live problems ──
-  // The big one: minimums are committed money. Nothing logged means either the
-  // payments are not happening or they are not being recorded, and both matter.
-  const debtMins=D.debts.filter(d=>(+d.balance||0)>0).reduce((s,d)=>s+(+d.minPayment||0),0);
+  // Debt. "Nothing logged this month" was too soft when nothing has EVER been
+  // logged - it implied a bookkeeping slip rather than a balance nobody has
+  // touched. Say which it is, and for how long.
+  const openDebts=D.debts.filter(d=>(+d.balance||0)>0);
+  const debtMins=openDebts.reduce((s,d)=>s+(+d.minPayment||0),0);
+  const debtOwed=openDebts.reduce((s,d)=>s+(+d.balance||0),0);
   const paidThisMonth=debtPaysForMonth().reduce((s,p)=>s+(+p.amount||0),0);
-  if(debtMins>0 && paidThisMonth<debtMins && day>=5){
-    const owners=[...new Set(D.debts.filter(d=>(+d.balance||0)>0&&(+d.minPayment||0)>0).map(d=>personName(d.owner)))];
+  const owners=[...new Set(openDebts.map(d=>personName(d.owner)))];
+  if(openDebts.length && !D.debtPayments.length){
+    const ms=openDebts.map(monthsUntouched).filter(m=>m!=null);
+    const longest=ms.length?Math.max.apply(null,ms):null;
+    push({id:'debt-never-paid',sev:'now',tab:null,icon:'💸',
+      title:`${f0(debtOwed)} of debt, no payment ever logged`,
+      sub:`${owners.join(' & ')}${longest?` · untouched for ${longest} month${longest===1?'':'s'}`:''}. Balances are not moving and payoff dates stay hidden until there is a real payment to forecast from.`,
+      action:"go('goals')", cta:'Go to Goals'});
+  } else if(debtMins>0 && paidThisMonth<debtMins && day>=5){
     push({id:'debt-mins',sev:'now',tab:null,icon:'💸',
       title:paidThisMonth>0?`${f0(debtMins-paidThisMonth)} of this month's debt minimums still unlogged`
                            :`${f0(debtMins)} in debt minimums, nothing logged this month`,
       sub:`Committed every month${owners.length?' · '+owners.join(' & '):''}. If you have paid, log it so the payoff dates are real; if not, this is the most expensive thing on the list.`,
       action:"go('goals')", cta:'Go to Goals'});
   }
+  // Every projection is computed from the rate. At 0% the app silently models
+  // frozen balances, which for federal loans is simply wrong.
+  const noApr=debtsNeedingApr();
+  if(noApr.length) push({id:'no-apr',sev:'soon',tab:null,icon:'📈',
+    title:`${noApr.length} debt${noApr.length===1?'':'s'} with no interest rate set`,
+    sub:'Shown as 0%, so the app treats these balances as frozen. Add the real rates and the payoff maths stops flattering you.',
+    action:"go('goals')", cta:'Add rates'});
   // Over-budget everyday categories, worst first. Framed as a number, not a scolding.
   const cats=catTotals();
   flexCategories().filter(c=>+c.budget>0 && (cats[c.name]||0)>+c.budget)
@@ -830,6 +893,29 @@ function netWorthChange(){
   if(prev==null) return null;
   return netWorth().net-prev;
 }
+// Payment history facts, kept separate from projection so nothing can quietly
+// assume a payment that never happened.
+function debtPayHistory(d){
+  const mine=D.debtPayments.filter(p=>p.debtId===d.id);
+  if(!mine.length) return {ever:false, count:0, last:null, monthsSince:null};
+  const last=mine.map(p=>String(p.date)).sort().pop();
+  const dt=new Date(last), now=new Date();
+  const months=(now.getFullYear()-dt.getFullYear())*12+(now.getMonth()-dt.getMonth());
+  return {ever:true, count:mine.length, last, monthsSince:Math.max(months,0)};
+}
+// How long this debt has been sitting untouched. Falls back to when it was first
+// tracked, so "never paid" still carries a duration instead of just a claim.
+function monthsUntouched(d){
+  const h=debtPayHistory(d);
+  if(h.ever) return h.monthsSince;
+  const from=d.created||D.debts.reduce((m,x)=>x.created&&(!m||x.created<m)?x.created:m,'');
+  if(!from) return null;
+  const dt=new Date(from), now=new Date();
+  if(isNaN(dt)) return null;
+  return Math.max((now.getFullYear()-dt.getFullYear())*12+(now.getMonth()-dt.getMonth()),0);
+}
+function aprMissing(d){ return !(+d.apr>0); }
+function debtsNeedingApr(){ return D.debts.filter(d=>(+d.balance||0)>0 && aprMissing(d)); }
 function debtPace(d){
   const cutoff=new Date(Date.now()-90*864e5);
   const paid90=D.debtPayments.filter(p=>p.debtId===d.id && new Date(p.date)>=cutoff).reduce((s,p)=>s+p.amount,0);
@@ -840,6 +926,83 @@ function strategyNext(){
   if(!open.length) return null;
   const sorted=[...open].sort((a,b)=> D.settings.strategy==='avalanche' ? ((+b.apr||0)-(+a.apr||0))||(a.balance-b.balance) : (a.balance-b.balance));
   return sorted[0];
+}
+
+// ─── Per-person spending ─────────────────────────────────────────────────────
+// Tapping a person opens their own view rather than just filtering the month.
+// Shared rows count as half here, matching ownerShare() elsewhere, so the two
+// people's totals still add up to the household's instead of double-counting.
+function openPerson(id){
+  S.pv.id=id; S.pv.cat=''; S.view='person'; window.scrollTo(0,0); render();
+  if(!D.ledger.length) loadLedger();
+}
+function setPV(k,v){ S.pv[k]=v; render(); }
+function personRows(){
+  const id=S.pv.id, r=periodRange(S.pv.period);
+  return ledgerRows().filter(t=>{
+    if(t.kind!=='expense') return false;
+    const d=String(t.date||''); if(d<r.from||d>r.to) return false;
+    if(S.pv.cat && (t.category||'')!==S.pv.cat) return false;
+    return (t.payer||BOTH)===id || (t.payer||BOTH)===BOTH;
+  });
+}
+function pvShare(t){ return (t.payer||BOTH)===BOTH?1/Math.max(D.people.length,1):1; }
+function personIncomeTotal(){
+  const id=S.pv.id, r=periodRange(S.pv.period);
+  return ledgerRows().filter(t=>t.kind==='income').filter(t=>{
+    const d=String(t.date||''); return d>=r.from&&d<=r.to;
+  }).reduce((s,t)=>s+t.amount*((t.payer||BOTH)===BOTH?1/Math.max(D.people.length,1):(t.payer===id?1:0)),0);
+}
+function personHTML(){
+  const id=S.pv.id, p=personById(id);
+  if(!p) return `<div class="card"><div class="empty"><div class="empty-h">Nobody selected</div></div></div>`;
+  const rows=personRows();
+  const spent=rows.reduce((s,t)=>s+t.amount*pvShare(t),0);
+  const earned=personIncomeTotal();
+  const months=periodMonths(S.pv.period);
+
+  const byCat={};
+  rows.forEach(t=>{ const c=t.category||'Uncategorised'; byCat[c]=(byCat[c]||0)+t.amount*pvShare(t); });
+  const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const max=cats.length?cats[0][1]:0;
+  const catBars=cats.map(([c,v])=>`<div class="pv-cat" onclick="setPV('cat','${jsEsc(S.pv.cat===c?'':c)}')">
+      <div class="bud-row"><span class="bud-name">${catIcon(c)} ${esc(c)}${S.pv.cat===c?' ✓':''}</span>
+        <span class="bud-nums">${f0(v)} · ${Math.round(v/(spent||1)*100)}%</span></div>
+      <div class="track"><div class="track-fill" style="width:${max?(v/max)*100:0}%;background:${catColor(c)}"></div></div>
+    </div>`).join('');
+
+  const sorted=[...rows].sort((a,b)=>{
+    const s=S.pv.sort;
+    if(s==='amount-desc') return b.amount-a.amount;
+    if(s==='amount-asc')  return a.amount-b.amount;
+    if(s==='date-asc')    return String(a.date).localeCompare(String(b.date));
+    if(s==='cat')         return String(a.category||'').localeCompare(String(b.category||''))||b.amount-a.amount;
+    return String(b.date).localeCompare(String(a.date));
+  });
+
+  const dd=(k,opts)=>`<select class="finput pv-dd" onchange="setPV('${k}',this.value)">${
+    opts.map(([v,l])=>`<option value="${esc(v)}" ${S.pv[k]===v?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
+  const catOpts=[['','All categories']].concat(categoriesByUse().map(c=>[c.name,`${c.icon} ${c.name}`]));
+
+  return `
+    <div class="pv-head">
+      <button class="pv-back" onclick="go('home')">‹</button>
+      <div class="pv-who">${p.emoji} ${esc(p.name)}</div>
+    </div>
+    <div class="card">
+      <div class="pv-dds">${dd('period',PERIODS)}${dd('cat',catOpts)}${dd('sort',SORTS)}</div>
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-val">${f0(spent)}</div><div class="stat-lbl">spent</div></div>
+        <div class="stat"><div class="stat-val">${f0(spent/months)}</div><div class="stat-lbl">per month</div></div>
+        <div class="stat"><div class="stat-val" style="color:${earned-spent>=0?'var(--mint)':'var(--peach)'}">${earned-spent>=0?'+':'−'}${f0(Math.abs(earned-spent))}</div><div class="stat-lbl">vs ${f0(earned)} in</div></div>
+      </div>
+      <div class="pv-note">${rows.length} purchase${rows.length===1?'':'s'}${S.pv.cat?` in ${esc(S.pv.cat)}`:''} · shared costs counted at ${Math.round(100/Math.max(D.people.length,1))}%${S.pv.loading?' · loading full history…':''}</div>
+    </div>
+    ${cats.length?`<div class="card"><div class="card-title-row" style="margin-bottom:8px"><span class="card-title">🗂 By category</span>${S.pv.cat?`<button class="card-toggle" onclick="setPV('cat','')">Clear</button>`:''}</div>${catBars}</div>`:''}
+    <div class="card">
+      <div class="card-title-row" style="margin-bottom:6px"><span class="card-title">🧾 Every purchase</span><span style="font-size:11px;font-weight:700;color:var(--txt3)">${esc((SORTS.find(x=>x[0]===S.pv.sort)||[])[1]||'')}</span></div>
+      ${sorted.length?sorted.map(t=>txRowHTML(t)).join(''):`<div class="empty"><div class="empty-ico">🍃</div><div class="empty-h">Nothing in this period</div><div class="empty-s">Try a wider time range</div></div>`}
+    </div>`;
 }
 
 // ─── Render router ────────────────────────────────────────────────────────────
@@ -853,6 +1016,7 @@ function render(){
   else if(S.view==='recap') body=recapHTML();
   else if(S.view==='settings') body=settingsHTML();
   else if(S.view==='moneydate') body=moneydateHTML();
+  else if(S.view==='person') body=personHTML();
   else body=homeHTML();
   app.innerHTML = topbarHTML() + body + navHTML() + (S.milestone?milestoneHTML():'') + (S.modal?modalHTML():'');
   if(S.view==='money' && S.moneyTab==='trends') (window.requestAnimationFrame||setTimeout)(drawCharts);
@@ -1040,10 +1204,10 @@ function homeHTML(){
   const recent=[...D.transactions].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,6);
   const recentList = recent.length?recent.map(t=>txRowHTML(t)).join(''):`<div class="empty"><div class="empty-ico">🐾</div><div class="empty-h">No spending yet</div><div class="empty-s">Tap ＋ to log your first one</div></div>`;
 
-  const personCards = D.people.map(p=>`<div class="person-card">
+  const personCards = D.people.map(p=>`<div class="person-card" onclick="openPerson('${p.id}')" style="cursor:pointer">
     <div class="pc-name">${p.emoji} ${esc(p.name)}</div>
     <div class="pc-spent">${f0(persons[p.id]||0)}</div>
-    <div class="pc-remaining ${(inc.byPerson[p.id]||0)>=(persons[p.id]||0)?'good':'warn'}">spent · earned ${f0(inc.byPerson[p.id]||0)}</div>
+    <div class="pc-remaining ${(inc.byPerson[p.id]||0)>=(persons[p.id]||0)?'good':'warn'}">spent · earned ${f0(inc.byPerson[p.id]||0)} ›</div>
   </div>`).join('');
 
   const expCount = txForMonth().filter(t=>t.kind==='expense').length;
@@ -1721,7 +1885,7 @@ function moneyHTML(){
   // Side-by-side so "who is carrying what" is answerable without toggling
   const perPerson=D.people.map(p=>{
     const n=netWorth(p.id);
-    return `<div class="person-card" onclick="setPerson('${p.id}')" style="cursor:pointer;${S.person===p.id?'border-color:var(--pink);box-shadow:0 0 0 2px var(--pink-glow)':''}">
+    return `<div class="person-card" onclick="openPerson('${p.id}')" style="cursor:pointer;${S.person===p.id?'border-color:var(--pink);box-shadow:0 0 0 2px var(--pink-glow)':''}">
       <div class="pc-name">${p.emoji} ${esc(p.name)}</div>
       <div class="pc-spent" style="color:${n.net>=0?'var(--mint)':'var(--rose)'};font-size:17px">${n.net<0?'−':''}${f0(Math.abs(n.net))}</div>
       <div class="pc-remaining" style="color:var(--txt3)">${f0(n.assets)} saved · ${f0(n.owed)} owed</div>
@@ -1815,13 +1979,27 @@ function toggleDebtForm(){ S.debtFormOpen=!S.debtFormOpen; if(!S.debtFormOpen){ 
 function toggleGoalForm(){ S.goalFormOpen=!S.goalFormOpen; render(); }
 function setStrategy(s){ D.settings.strategy=s; commit('settings'); render(); }
 
+// A payoff date is a forecast of payments you are making. Projecting one from a
+// minimum nobody has ever paid produced a confident, false date - the app said
+// "debt-free Mar 2028" about a balance that has not moved. Only forecast from
+// real payment history; otherwise state the true position.
 function debtProjHTML(d){
   if(d.balance<=0) return `<div class="debt-proj" style="color:var(--mint);font-weight:800">Paid off 🎉</div>`;
-  const pace=debtPace(d);
-  if(pace<=0) return `<div class="debt-proj">Set a monthly payment to see a payoff date</div>`;
+  const h=debtPayHistory(d);
+  const min=+d.minPayment||0;
+  if(!h.ever){
+    const m=monthsUntouched(d);
+    const since=m===null?'':m===0?' · tracked since this month':` · untouched for ${m} month${m===1?'':'s'}`;
+    return `<div class="debt-proj" style="color:var(--peach)">No payment logged yet${since}${min>0?` · minimum is ${f0(min)}/mo`:''}</div>`;
+  }
+  const paid90=D.debtPayments.filter(p=>p.debtId===d.id && new Date(p.date)>=new Date(Date.now()-90*864e5))
+    .reduce((s,p)=>s+p.amount,0);
+  if(paid90<=0) return `<div class="debt-proj" style="color:var(--peach)">Nothing paid in 90 days · last was ${esc(h.last)}</div>`;
+  const pace=paid90/3;
   const months=Math.ceil(d.balance/pace);
   const dt=new Date(); dt.setMonth(dt.getMonth()+months);
-  return `<div class="debt-proj">At ~${f0(pace)}/mo · debt-free <b>${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}</b></div>`;
+  const caveat=aprMissing(d)?' (no interest rate set, so this is optimistic)':'';
+  return `<div class="debt-proj">At your actual ~${f0(pace)}/mo · debt-free <b>${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}</b>${caveat}</div>`;
 }
 function debtFormHTML(){
   const f=S.debtForm;
@@ -1883,6 +2061,8 @@ function goalsHTML(){
   const meltPct=start>0?(owed/start)*100:0;
   const next=strategyNext();
   const allZeroApr=debts.filter(d=>d.balance>0).every(d=>!(+d.apr));
+  const noPaymentsEver=!D.debtPayments.length;
+  const missingApr=debtsNeedingApr();
   const cardDebtRow=c=>`<div class="debt">
     <div class="debt-row"><div class="debt-name">💳 ${esc(c.name)} <span style="font-weight:600;color:var(--txt3);font-size:11px">· ${esc(ownerLabel(c.owner))}</span></div><div class="debt-bal">${f$(c.balance)}</div></div>
     <div class="debt-proj">${(+c.limit||0)>0?`${Math.round((+c.balance||0)/(+c.limit)*100)}% of ${f0(c.limit)} limit · grows as you charge · `:'Grows as you charge · '}<b onclick="openPayCardModal('${c.id}')" style="color:var(--sky);cursor:pointer">tap to pay off</b></div>
@@ -1897,8 +2077,12 @@ function goalsHTML(){
       ${S.debtFormOpen?debtFormHTML():''}
       ${start>0?`<div class="melt-wrap">
         <div class="melt"><div class="melt-fill" style="width:${meltPct}%"></div></div>
-        <div class="melt-lbls"><span style="color:var(--mint);font-weight:700">${f0(paidAll)} crushed</span><span>${f0(owed)} to go</span></div>
+        <div class="melt-lbls">${paidAll>0
+          ?`<span style="color:var(--mint);font-weight:700">${f0(paidAll)} crushed</span><span>${f0(owed)} to go</span>`
+          :`<span style="color:var(--txt3);font-weight:700">Nothing paid down yet</span><span>${f0(owed)} owed</span>`}</div>
       </div>`:''}
+      ${noPaymentsEver&&debts.some(d=>d.balance>0)?`<div class="debt-note">No payment has ever been logged against ${debts.filter(d=>d.balance>0).length} open debt${debts.filter(d=>d.balance>0).length===1?'':'s'}. Payoff dates stay hidden until there is real history to forecast from.</div>`:''}
+      ${missingApr.length?`<div class="debt-note">${missingApr.length} debt${missingApr.length===1?' has':'s have'} no interest rate set, so every balance here is shown as if it were frozen. Federal loans are not — add the real rates with ✏️ Edit and the numbers become honest.</div>`:''}
       ${debts.map(debtRowHTML).join('')}
       ${cardAccts.map(cardDebtRow).join('')}
     </div>

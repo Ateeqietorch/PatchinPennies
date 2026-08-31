@@ -50,6 +50,20 @@ function getAll(month,year){
   };
 }
 
+// Every transaction and income row, all months. The client normally holds one
+// month; the per-person spending view needs "last 3 months" and "this year", so
+// it pulls this once and caches it. Trimmed to the fields those views read.
+function getLedger(){
+  const tx=rowsAsObjects(sheet(TX_SHEET)).map(function(t){
+    return {ID:t.ID,Date:fmtDate(t.Date),Description:t.Description,Category:t.Category,
+            PaidBy:t.PaidBy,Amount:num(t.Amount),TxType:t.TxType,Need:t.Need||"",Sub:t.Sub||""};
+  }).filter(function(t){ return t.Date; });
+  const inc=rowsAsObjects(sheet(INCOME_SHEET)).map(function(i){
+    return {ID:i.ID,Date:fmtDate(i.Date),Description:i.Description,Source:i.Source,Amount:num(i.Amount)};
+  }).filter(function(i){ return i.Date; });
+  return {transactions:tx, income:inc};
+}
+
 // Cross-month context the client can't compute from a single month's rows:
 // last-6-months income/expense series and the previous month's per-category
 // totals (for "vs last month" deltas). One read of each sheet.
@@ -87,6 +101,7 @@ function doGet(e){
     switch(a){
       case "getAll":             r=getAll(e.parameter.month,e.parameter.year); break;
       case "getTransactions":    r=getTransactions(e.parameter.month,e.parameter.year); break;
+      case "getLedger":          r=getLedger(); break;
       case "addTransaction":     r=addTransaction(e.parameter); break;
       case "updateTransaction":  r=updateTransaction(e.parameter); break;
       case "deleteTransaction":  r=deleteTransaction(e.parameter.id); break;
@@ -279,6 +294,24 @@ var MIGRATIONS_=[
   }},
   // Ateeq's second card ($5,000 limit), requested 2026-08-27. Fixed ID so a
   // re-run can never create a duplicate; skipped entirely if it already exists.
+  // Ateeq's paycheck was in the Income sheet twice: once typed in by hand
+  // ("WISE"), once picked up by the statement scanner ("Gusto Payroll", the
+  // payroll processor behind it). Same dates, amounts within a dollar or ten.
+  // August income read $5,798 when it was really $3,833, which made a $706
+  // deficit look like a $1,259 surplus. Keep the scanned rows - the bank
+  // statement is ground truth and the manual figures were rounded - but move
+  // them off "Both", since this is Ateeq's salary and not shared income.
+  {key:"mig_2026_08_dedupe_income", run:function(){
+    ["aa9f5cbe-9d4d-4d7e-99f6-feccc3c12f71",   // WISE 7/31 $3,089.00 -> Gusto $3,089.95
+     "8d974705-24fa-4b67-a458-25ae5bb358aa"]   // WISE 8/14 $1,955.00 -> Gusto $1,965.18
+      .forEach(function(id){ deleteRowById(sheet(INCOME_SHEET),id); });
+    ["e106a788-0f3a-406c-988e-95001d3ceb98",
+     "9b10f95c-f65e-46b5-a75c-1474a294541d"]
+      .forEach(function(id){ updateRowById(sheet(INCOME_SHEET),id,{Source:"Ateeq"}); });
+    // Three rows shared one ID (a scan import that ran twice). Identical IDs are
+    // always a bug - no legitimate row can collide - so collapse to the first.
+    dedupeById_(sheet(TX_SHEET));
+  }},
   {key:"mig_2026_08_add_5k_card", run:function(){
     const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
     if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;
@@ -346,6 +379,19 @@ function mig_2026_08_cleanup_(){
     const want=BILLS[String(data[i][iName])]?"bill":"flex";
     if(String(data[i][iKind]||"")!==want) cat.getRange(i+1,iKind+1).setValue(want);
   }
+}
+// Removes rows whose ID has already been seen. Walks bottom-up so deleting a
+// row cannot shift the index of one still to be checked.
+function dedupeById_(sh){
+  const data=sh.getDataRange().getValues(); const idCol=data[0].map(String).indexOf("ID");
+  if(idCol<0) return 0;
+  const seen={}; const kill=[];
+  for(let i=1;i<data.length;i++){
+    const id=String(data[i][idCol]); if(!id) continue;
+    if(seen[id]) kill.push(i+1); else seen[id]=true;
+  }
+  for(let j=kill.length-1;j>=0;j--) sh.deleteRow(kill[j]);
+  return kill.length;
 }
 function reattributeByNote_(sh,noteMarker,col,value){
   if(!sh||sh.getLastRow()<2) return;
@@ -609,7 +655,10 @@ function getDebts(){
     ID:d.ID, Name:d.Name, Owner:d.Owner||"Both",
     StartBalance:num(d.StartBalance), Balance:num(d.Balance),
     APR:num(d.APR), MinPayment:num(d.MinPayment),
-    HighPriority:String(d.HighPriority||"no").toLowerCase()==="yes"
+    HighPriority:String(d.HighPriority||"no").toLowerCase()==="yes",
+    // When the debt was first tracked. Needed to say how long a balance has sat
+    // untouched when there is no payment history to measure from.
+    Created:d.Created?fmtDate(d.Created):""
   }));
   const payments=rowsAsObjects(sheet(DEBTPAY_SHEET)).map(pm=>({
     ID:pm.ID, DebtID:pm.DebtID, Date:fmtDate(pm.Date), Amount:num(pm.Amount), PaidBy:pm.PaidBy
