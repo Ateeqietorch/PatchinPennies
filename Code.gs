@@ -312,6 +312,51 @@ var MIGRATIONS_=[
     // always a bug - no legitimate row can collide - so collapse to the first.
     dedupeById_(sheet(TX_SHEET));
   }},
+  // Statement screenshots from 2026-08-31, all Ateeq's. Rows already present in
+  // the sheet (La Fitness, South Loop Market, Fidelity, four Uber/Uber Eats,
+  // the mobile deposit) are deliberately absent - they were checked first.
+  // Fixed IDs so a re-run cannot duplicate anything.
+  {key:"mig_2026_08_31_statement", run:function(){
+    const SPEND=[
+      ["a1e00001","2026-08-31","Tst* Leye Ramen-san","Dining Out",2.10,"want"],
+      ["a1e00002","2026-08-28","Anthropic (Claude API)","Subscriptions",20.00,"need"],
+      ["a1e00003","2026-08-28","Anthropic (Claude API)","Subscriptions",5.00,"need"],
+      ["a1e00004","2026-08-27","Ls Foursided, Chicago","Shopping",122.25,"want"],
+      ["a1e00005","2026-08-27","McDonald's","Dining Out",4.23,"want"],
+      ["a1e00006","2026-08-25","Amazon Reta* 5o7ta","Shopping",0.12,"need"],
+      ["a1e00007","2026-08-24","Lakeside Food Wine","Groceries",6.45,"need"],
+      // Ateeq confirmed this Venmo was money to Celeste for lunch - consumed,
+      // not relocated, so it is spending and not a transfer.
+      ["a1e00008","2026-08-24","Venmo to Celeste - lunch","Dining Out",55.00,"want"],
+      ["a1e00009","2026-08-21","Uep*happy Lamb Hot Pot","Dining Out",58.13,"want"],
+      ["a1e00010","2026-08-21","Uber Eats","Dining Out",29.70,"want"],
+      ["a1e00011","2026-08-20","Immediate Funds Processing Fee","Personal/Misc",3.00,"need"],
+      ["a1e00012","2026-08-19","ParkChicago","Transportation",20.00,"need"]
+    ];
+    SPEND.forEach(function(r){
+      if(getCell(sheet(TX_SHEET),r[0],"ID")!==null) return;
+      addTransaction({id:r[0],date:r[1],description:r[2],category:r[3],paidBy:"Ateeq",
+                      amount:r[4],txType:"One-time",need:r[5]});
+    });
+    // Money that left checking but was not consumed. Marked TRANSFER in Notes so
+    // the client reads them as kind:'transfer' - visible in Activity and in
+    // "what left the account", excluded from every spending total.
+    const MOVED=[
+      ["a1e00020","2026-08-31","Zelle to Celeste - my half of rent","TRANSFER:settle",900.00],
+      ["a1e00021","2026-08-31","5/3 Online Transfer","TRANSFER:unknown",990.00],
+      ["a1e00022","2026-08-31","Fidelity - investing","TRANSFER:savings",50.00],
+      ["a1e00023","2026-08-21","Transfer to Zelle","TRANSFER:unknown",850.00]
+    ];
+    MOVED.forEach(function(r){
+      if(getCell(sheet(TX_SHEET),r[0],"ID")!==null) return;
+      addTransaction({id:r[0],date:r[1],description:r[2],category:"Personal/Misc",paidBy:"Ateeq",
+                      amount:r[4],txType:"One-time",notes:r[3]});
+    });
+    // Second semi-monthly Gusto deposit. The 8/14 one is already in the sheet;
+    // same amount because it is the same salary, not a duplicate.
+    if(getCell(sheet(INCOME_SHEET),"a1e00030","ID")===null)
+      addIncome({id:"a1e00030",date:"2026-08-31",description:"Gusto Payroll",source:"Ateeq",amount:1965.18});
+  }},
   {key:"mig_2026_08_add_5k_card", run:function(){
     const ID="c5000a7e-0000-4000-8000-a7e59c5000ca";
     if(getCell(sheet(ACCT_SHEET),ID,"ID")!==null) return;

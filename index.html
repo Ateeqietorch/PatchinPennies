@@ -177,6 +177,11 @@ textarea.finput{resize:none;min-height:60px}
 .pv-dd{flex:1 1 30%;min-width:104px;padding:9px 8px;font-size:12px}
 .pv-note{font-size:11px;font-weight:600;color:var(--txt2);text-align:center;margin-top:9px}
 .pv-cat{margin-bottom:11px;cursor:pointer}
+.co-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bg2)}
+.co-lbl{font-size:12.5px;font-weight:800;color:var(--txt)}
+.co-note{font-size:10.5px;font-weight:600;color:var(--txt3);margin-top:1px}
+.co-val{font-family:var(--mono);font-size:14px;font-weight:500;white-space:nowrap}
+.co-foot{font-size:11px;font-weight:600;color:var(--txt2);line-height:1.45;margin-top:9px}
 .debt-note{background:var(--peach-soft);border-radius:11px;padding:9px 11px;font-size:11.5px;font-weight:600;color:var(--txt);line-height:1.45;margin-bottom:10px}
 
 /* Goals */
@@ -462,9 +467,21 @@ async function flushQueue(){
 }
 
 // ─── Server <-> client field mapping ───────────────────────────────────────────
+// A row marked TRANSFER in Notes is money you moved, not money you consumed.
+// It renders in Activity and counts toward "left your account", but every
+// spending total (totalExpenses, catTotals, personTotals, settleUp) already
+// filters on kind==='expense', so it cannot inflate a budget.
+// TRANSFER:savings = into savings/investments · :settle = paying your share of a
+// shared bill already recorded · :unknown = destination not yet confirmed.
+function transferKindOf(notes){
+  const m=/TRANSFER:?(\w+)?/.exec(String(notes||''));
+  return m?(m[1]||'unknown'):null;
+}
 function fromServerTx(t){
+  const tk=transferKindOf(t.Notes);
   return { id:t.ID, date:t.Date, desc:t.Description, category:t.Category, payer:fromServerPerson(t.PaidBy),
-    amount:+t.Amount||0, kind:'expense', need:(t.Need||'need').toLowerCase()==='want'?'want':'need',
+    amount:+t.Amount||0, kind:tk?'transfer':'expense', transferKind:tk,
+    need:(t.Need||'need').toLowerCase()==='want'?'want':'need',
     sub:String(t.Sub||'').toLowerCase()==='yes', notes:t.Notes||'', txType:t.TxType==='Recurring'?'recurring':'one-time',
     cardSettled: String(t.Notes||'').indexOf('CARD_SETTLED')>-1 };
 }
@@ -953,6 +970,38 @@ function personIncomeTotal(){
     const d=String(t.date||''); return d>=r.from&&d<=r.to;
   }).reduce((s,t)=>s+t.amount*((t.payer||BOTH)===BOTH?1/Math.max(D.people.length,1):(t.payer===id?1:0)),0);
 }
+// Ateeq's question: "that money isn't in my account any more, why isn't it
+// spending?" Both halves are true - it left the account, and it was not
+// consumed - so show both instead of picking one. Spending answers "what did we
+// consume"; this answers "what drained the account".
+function cashOut(personId,period){
+  const r=periodRange(period), id=personId;
+  const mine=t=>(t.payer||BOTH)===id||(t.payer||BOTH)===BOTH;
+  const share=t=>(t.payer||BOTH)===BOTH?1/Math.max(D.people.length,1):1;
+  const inRange=t=>{const d=String(t.date||'');return d>=r.from&&d<=r.to;};
+  const rows=ledgerRows().filter(t=>inRange(t)&&mine(t));
+  const spent=rows.filter(t=>t.kind==='expense').reduce((s,t)=>s+t.amount*share(t),0);
+  const tr=k=>rows.filter(t=>t.kind==='transfer'&&t.transferKind===k).reduce((s,t)=>s+t.amount*share(t),0);
+  const saved=tr('savings'), settled=tr('settle'), unknown=tr('unknown')+tr('external');
+  return {spent,saved,settled,unknown,total:spent+saved+settled+unknown};
+}
+function cashOutHTML(){
+  const c=cashOut(S.pv.id,S.pv.period);
+  if(!c.total) return '';
+  const row=(lbl,val,note,col)=>val?`<div class="co-row">
+    <div><div class="co-lbl">${lbl}</div><div class="co-note">${note}</div></div>
+    <div class="co-val" style="${col?'color:'+col:''}">${f0(val)}</div></div>`:'';
+  return `<div class="card">
+    <div class="card-title-row" style="margin-bottom:8px"><span class="card-title">💧 What left the account</span>
+      <span style="font-size:13px;font-weight:800;font-family:var(--mono)">${f0(c.total)}</span></div>
+    ${row('Spent',c.spent,'Gone — bought something','var(--peach)')}
+    ${row('Moved to savings',c.saved,'Still yours, different account','var(--mint)')}
+    ${row('Settled with '+personName(D.people.filter(p=>p.id!==S.pv.id).map(p=>p.id)[0]),c.settled,'Your half of a shared bill already counted above','var(--sky)')}
+    ${row('Destination unconfirmed',c.unknown,'Tell me where these went and I will reclassify','var(--txt2)')}
+    <div class="co-foot">Only <b>${f0(c.spent)}</b> of this is spending. The rest left your checking account but is either still yours or settles a bill already counted, so counting it again would double it.</div>
+  </div>`;
+}
+
 function personHTML(){
   const id=S.pv.id, p=personById(id);
   if(!p) return `<div class="card"><div class="empty"><div class="empty-h">Nobody selected</div></div></div>`;
@@ -998,6 +1047,7 @@ function personHTML(){
       </div>
       <div class="pv-note">${rows.length} purchase${rows.length===1?'':'s'}${S.pv.cat?` in ${esc(S.pv.cat)}`:''} · shared costs counted at ${Math.round(100/Math.max(D.people.length,1))}%${S.pv.loading?' · loading full history…':''}</div>
     </div>
+    ${cashOutHTML()}
     ${cats.length?`<div class="card"><div class="card-title-row" style="margin-bottom:8px"><span class="card-title">🗂 By category</span>${S.pv.cat?`<button class="card-toggle" onclick="setPV('cat','')">Clear</button>`:''}</div>${catBars}</div>`:''}
     <div class="card">
       <div class="card-title-row" style="margin-bottom:6px"><span class="card-title">🧾 Every purchase</span><span style="font-size:11px;font-weight:700;color:var(--txt3)">${esc((SORTS.find(x=>x[0]===S.pv.sort)||[])[1]||'')}</span></div>
@@ -1822,7 +1872,7 @@ function activityHTML(){
   const spent=rows.filter(t=>t.kind==='expense').reduce((s,t)=>s+t.amount,0);
   const earned=rows.filter(t=>t.kind==='income').reduce((s,t)=>s+t.amount,0);
   const active=S.act.q||S.act.cat||S.act.kind!=='all';
-  const kindSeg=[['all','All'],['expense','Spending'],['income','Income'],['queued','On card']]
+  const kindSeg=[['all','All'],['expense','Spending'],['transfer','Moved'],['income','Income'],['queued','On card']]
     .map(([k,l])=>`<div class="seg-opt ${S.act.kind===k?'on':''}" onclick="setAct('kind','${k}')">${l}</div>`).join('');
   const catOpts=[`<option value="">All categories</option>`].concat(
     categoriesByUse().map(c=>`<option value="${esc(c.name)}" ${S.act.cat===c.name?'selected':''}>${c.icon} ${esc(c.name)}</option>`)).join('');
