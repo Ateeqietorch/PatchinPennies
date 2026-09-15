@@ -150,6 +150,7 @@ textarea.finput{resize:none;min-height:60px}
 .qa-amt{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--txt3);display:block;margin-top:2px}
 .disclose{width:100%;background:none;border:none;color:var(--txt2);font-family:var(--font);font-size:12px;font-weight:800;cursor:pointer;padding:8px;margin-bottom:6px}
 .catfind{margin-bottom:8px;padding:9px 12px;font-size:13px}
+.scan-hint{font-size:11px;font-weight:600;color:var(--txt2);line-height:1.45;margin-bottom:7px}
 .catnone{width:100%;font-size:12px;color:var(--txt3);font-weight:600;margin-bottom:6px;line-height:1.4}
 .catnone span{color:var(--pink);cursor:pointer;text-decoration:underline}
 .actfind{margin-bottom:8px;padding:10px 13px;font-size:14px}
@@ -1639,8 +1640,9 @@ async function runStatementScan(){
     type:'object',
     properties:{ transactions:{ type:'array', items:{ type:'object', properties:{
       date:{type:'string'}, description:{type:'string'}, amount:{type:'number'},
-      kind:{type:'string',enum:['expense','income','skip']}, category:{type:'string'}
-    }, required:['date','description','amount','kind','category'], additionalProperties:false } } },
+      kind:{type:'string',enum:['expense','income','skip']}, category:{type:'string'},
+      paidBy:{type:'string',enum:[...D.people.map(p=>p.name),'Both','']}
+    }, required:['date','description','amount','kind','category','paidBy'], additionalProperties:false } } },
     required:['transactions'], additionalProperties:false
   };
   const n=S.scan.images.length;
@@ -1655,8 +1657,9 @@ For each transaction output:
 - amount: a positive number, no currency symbol
 - kind: "expense" for a purchase/charge/debit, "income" for a deposit/refund/credit paid TO the account holder, or "skip" for anything that isn't a real transaction to log (statement balance lines, minimum-payment lines, the card's own autopay/payment line, running totals, headers/footers)
 - category: pick the single closest match from this exact list (copy the text exactly): ${JSON.stringify(categoryNames)}. Only if nothing on the list is a reasonable fit, propose a sensible NEW category name instead (Title Case, 1-3 words, e.g. "Travel" or "Car Repairs") — do not force a bad match and do not leave it blank.
+- paidBy: leave this EMPTY unless the user's context below explicitly says who paid for that specific transaction. A statement cannot tell you who paid, so never infer it from the merchant, the amount, or the kind of purchase. Use one of ${JSON.stringify(D.people.map(p=>p.name))} only when the note names that person for that transaction, or "Both" when the note says it was shared or split. Anything left empty is attributed to whoever the user marks as the statement's owner.
 
-Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.${notes?`\n\nThe user also gave you this context — it may describe what the photos are, or call out specific transactions (by merchant, date, and/or amount) with corrections to their description or category. Where it's specific about a transaction, prefer the user's description/category for that transaction over what's printed:\n"""\n${notes}\n"""`:''}`;
+Return every transaction you can read, even if partially obscured — do your best rather than skipping unclear ones.${notes?`\n\nThe user also gave you this context. It may describe what the photos are, or it may call out specific transactions (by merchant, date and/or amount) to correct their description or category, or to say WHO PAID for them — for example "the grocery charge on 3/16 was paid for by Celeste only" or "everything at Target was split". Match each instruction to the transaction it describes and apply it: prefer the user's description and category over what is printed, and set paidBy whenever they name a person. An instruction that names no specific transaction (e.g. "this is our Chase card") is background, not a per-row correction:\n"""\n${notes}\n"""`:''}`;
   try{
     const content=S.scan.images.map(img=>({type:'image',source:{type:'base64',media_type:img.mediaType,data:img.b64}}));
     content.push({type:'text',text:prompt});
@@ -1681,8 +1684,10 @@ Return every transaction you can read, even if partially obscured — do your be
       const proposed=(t.category||'').trim();
       // Keep Claude's proposed category even if it isn't in the list yet —
       // the review screen marks it "(new)" and importing creates it for real.
+      const named=scanRowPayer(t.paidBy);
       return { id:i, date:t.date, desc:t.description||'', amount:Math.abs(+t.amount||0), kind,
         category:proposed||(categoryNames[0]||''), isNewCategory:!!proposed&&!categoryNames.includes(proposed),
+        payer:named, payerFromNote:!!named,
         include: kind!=='skip' && !dup, duplicate:!!dup };
     });
     S.scan.status='results';
@@ -1697,9 +1702,20 @@ function toggleScanRow(id){ const r=S.scan.rows.find(x=>x.id===id); if(!r)return
 function setScanRowField(id,key,val){
   const r=S.scan.rows.find(x=>x.id===id); if(!r)return;
   if(key==='amount') r.amount=Math.abs(parseFloat(val))||0;
+  else if(key==='payer'){ r.payer=val||null; r.payerFromNote=false; }  // '' = fall back to the statement owner
   else r[key]=val;
   if(key==='kind') r.include = (val!=='skip');
   render();
+}
+// A statement cannot show who paid, so a row only carries a person when the
+// user's note said so. null means "not stated" and falls through to the
+// statement's owner at import, rather than silently hard-coding someone.
+function scanRowPayer(name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n) return null;
+  if(n==='both'||n==='shared'||n==='split') return BOTH;
+  const p=D.people.find(x=>x.name.toLowerCase()===n);
+  return p?p.id:null;
 }
 function scanPayer(){ return S.scan.payer||cardholderId(); } // defaults to the cardholder, not a 50/50 split
 function setScanPayer(p){ S.scan.payer=p; render(); }
@@ -1725,7 +1741,14 @@ function scanHTML(){
     ${thumbs?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">${thumbs}</div>`:''}
     <button class="receipt-btn" onclick="document.getElementById('statementInput').click()">${s.images.length?'📷 Add more photos':'📷 Choose photo(s)'}</button>
     <input type="file" id="statementInput" accept="image/*" multiple style="display:none" onchange="handleStatementFile(this)">
-    <div class="fgroup" style="margin-top:12px"><label class="flabel">Describe it (optional)</label><textarea class="finput" placeholder="e.g. &quot;This is our Chase card, March statement&quot; or &quot;the $40 charge on the 14th was a birthday gift, categorize as Shopping&quot;" oninput="setScanNotes(this.value)" style="min-height:64px">${esc(s.notes)}</textarea></div>
+    <div class="fgroup" style="margin-top:14px">
+      <label class="flabel">Anything I should know? (optional)</label>
+      <div class="scan-hint">Tell me about the photos, or call out individual charges by merchant, date or amount. You can correct a <b>description</b>, change a <b>category</b>, or say <b>who paid</b> — anything you attribute to a person here overrides the statement owner below, just for that charge.</div>
+      <textarea class="finput" placeholder="e.g. &quot;This is our Chase card, March statement.&quot;
+&quot;The grocery charge on 3/16 was paid for by Celeste only.&quot;
+&quot;Everything at Target was split between us.&quot;
+&quot;The $40 on the 14th was a birthday gift — put it under Shopping.&quot;" oninput="setScanNotes(this.value)" style="min-height:104px;line-height:1.5">${esc(s.notes)}</textarea>
+    </div>
     <button class="btn-primary" style="margin-top:4px" onclick="runStatementScan()" ${s.images.length?'':'disabled'}>Scan ${s.images.length>1?`${s.images.length} photos`:'statement'}</button>
   </div>`;
 }
@@ -1742,7 +1765,7 @@ function scanResultsHTML(){
         <input class="finput" type="date" value="${r.date}" onchange="setScanRowField(${r.id},'date',this.value)" style="padding:6px 8px;font-size:12px;flex:0 0 132px">
         <input class="finput" type="text" value="${esc(r.desc)}" onchange="setScanRowField(${r.id},'desc',this.value)" style="padding:6px 8px;font-size:12px;flex:1">
       </div>
-      <div style="display:flex;gap:6px;align-items:center">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input class="finput" type="text" inputmode="decimal" value="${r.amount}" onchange="setScanRowField(${r.id},'amount',this.value)" style="padding:6px 8px;font-size:12px;width:76px;font-family:var(--mono)">
         <select class="finput" onchange="setScanRowField(${r.id},'category',this.value)" style="padding:6px 8px;font-size:11px;flex:1" ${r.kind==='income'?'disabled':''}>
           ${D.categories.map(c=>`<option value="${jsEsc(c.name)}" ${r.category===c.name?'selected':''}>${c.icon} ${esc(c.name)}</option>`).join('')}
@@ -1753,14 +1776,21 @@ function scanResultsHTML(){
           <option value="income" ${r.kind==='income'?'selected':''}>Income</option>
           <option value="skip" ${r.kind==='skip'?'selected':''}>Skip</option>
         </select>
+        <select class="finput" onchange="setScanRowField(${r.id},'payer',this.value)" style="padding:6px 8px;font-size:11px;flex:1 1 118px">
+          <option value="" ${!r.payer?'selected':''}>↳ ${esc(personName(scanPayer()))} (default)</option>
+          ${payerOptions().map(p=>`<option value="${p.id}" ${r.payer===p.id?'selected':''}>${p.emoji} ${esc(p.name)}</option>`).join('')}
+        </select>
       </div>
+      ${r.payerFromNote?`<div style="font-size:10.5px;color:var(--sky);font-weight:700;margin-top:3px">💬 Paid by ${esc(personName(r.payer))} — from your note</div>`:''}
       ${r.duplicate?`<div style="font-size:10.5px;color:var(--peach);font-weight:700;margin-top:3px">⚠️ Looks already logged — unchecked by default</div>`:''}
     </div>
   </div>`;
   return `<div class="card">
     <div class="card-title-row"><span class="card-title">🧾 Found ${rows.length} line${rows.length!==1?'s':''}</span><button class="card-toggle" onclick="cancelScan()">Start over</button></div>
     <div style="font-size:11.5px;color:var(--txt2);font-weight:600;margin-bottom:10px">${included} selected to import · ${dupCount} look already logged · ${skipped} non-transaction line${skipped!==1?'s':''} de-emphasized. Uncheck, edit, or fix anything before importing.</div>
-    <div class="fgroup"><label class="flabel">Whose statement is this?</label><div class="seg">${ownerSeg}</div></div>
+    <div class="fgroup"><label class="flabel">Whose statement is this?</label><div class="seg">${ownerSeg}</div>
+      <div class="scan-hint" style="margin-top:6px;margin-bottom:0">Every row lands on this person unless its own dropdown says otherwise. Rows your note named are already set and marked 💬.</div>
+    </div>
     ${rows.map(rowHTML).join('')}
     <button class="btn-primary" style="margin-top:6px" onclick="importScanRows()">Import ${included} transaction${included!==1?'s':''}</button>
   </div>`;
@@ -1775,7 +1805,7 @@ function importScanRows(){
       D.categories.push(c); commit('categories');
       syncOp('addCategory',{id:c.id,name:c.name,icon:c.icon,color:c.color,budget:0,kind:'flex'});
     }
-    const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:scanPayer(),amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
+    const tx=addTransactionRaw({date:r.date,desc:r.desc||'Statement import',category:r.kind==='income'?'':r.category,payer:r.payer||scanPayer(),amount:Math.abs(r.amount)||0,kind:r.kind,need:'need',sub:false,notes:'Imported from statement scan',txType:'one-time'});
     syncOp(r.kind==='income'?'addIncome':'addTransaction', r.kind==='income'?toServerIncomeParams(tx):toServerTxParams(tx));
   });
   showToast(`✅ Imported ${rows.length} transaction${rows.length!==1?'s':''}`);
